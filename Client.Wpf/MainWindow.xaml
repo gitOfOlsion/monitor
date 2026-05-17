@@ -1,0 +1,73 @@
+<Window x:Class="PeripheralMonitor.Client.Wpf.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Peripheral Monitor Dashboard" Height="700" Width="1200">
+    
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="200"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <TextBlock Text="🖥️ Managed Agents" FontWeight="Bold" FontSize="16" VerticalAlignment="Center"/>
+            <Button Content="🔄 Refresh" Click="Refresh_Click" Margin="10,0,0,0" Padding="10,4"/>
+            <TextBlock x:Name="StatusText" Text="Status: Initializing..." Margin="20,0,0,0" 
+                       VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
+        </StackPanel>
+
+        <!-- Agent Grid -->
+        <GroupBox Header="Registered Agents" Grid.Row="1" Margin="0,0,0,5">
+            <DataGrid x:Name="AgentsGrid"
+                      AutoGenerateColumns="False"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      SelectionMode="Single"
+                      IsReadOnly="True">
+                      <!-- SelectionChanged="AgentsGrid_SelectionChanged-->
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Machine" Binding="{Binding MachineName}" Width="150"/>
+                    <DataGridTextColumn Header="IP Address" Binding="{Binding IPAddress}" Width="120"/>
+                    <DataGridTextColumn Header="MAC Address" Binding="{Binding MacAddress}" Width="140"/>
+                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="100"/>
+                    <DataGridTextColumn Header="First Seen" Binding="{Binding FirstSeen, StringFormat={}{0:yyyy-MM-dd HH:mm}}" Width="130"/>
+                    <DataGridTextColumn Header="Approved By" Binding="{Binding ApprovedBy}" Width="100"/>
+                    <DataGridTemplateColumn Header="Activity" Width="110">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Button Content="📋 Activity"
+                                    Padding="6,3"
+                                    Tag="{Binding MachineName}"
+                                    Click="ShowActivity_Click"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+
+        <!-- Action Buttons -->
+        <StackPanel Grid.Row="1" VerticalAlignment="Top" HorizontalAlignment="Right" Margin="0,-25,10,0" Orientation="Horizontal">
+            <Button Content="✅ Approve" Click="Approve_Click" Padding="12,6" Margin="0,0,5,0"/>
+            <Button Content="🗑️ Delete" Click="Delete_Click" Padding="12,6" Background="#ffe0e0"/>
+        </StackPanel>
+
+        <!-- Live Events -->
+        <GroupBox Header="📡 Live Device Events (All PCs)" Grid.Row="2" Margin="0,5,0,0">
+            <ListView x:Name="EventsList">
+                <ListView.View>
+                   <GridView>
+                        <GridViewColumn Header="Machine" DisplayMemberBinding="{Binding MachineName}" Width="120"/>
+                        <GridViewColumn Header="Event"   DisplayMemberBinding="{Binding EventType}"   Width="90"/>
+                        <GridViewColumn Header="Device"  DisplayMemberBinding="{Binding DeviceName}"  Width="200"/>
+                        <GridViewColumn Header="Time"    DisplayMemberBinding="{Binding Timestamp, StringFormat={}{0:HH:mm:ss}}" Width="100"/>
+                    </GridView>
+                </ListView.View>
+            </ListView>
+        </GroupBox>
+    </Grid>
+</Window>
+
+

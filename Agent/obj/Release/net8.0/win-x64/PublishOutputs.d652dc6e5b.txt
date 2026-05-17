@@ -1,0 +1,4 @@
+C:\Users\opollogati\Desktop\device_monitor\PeripheralMonitor\publish\agent\appsettings.json
+C:\Users\opollogati\Desktop\device_monitor\PeripheralMonitor\publish\agent\PeripheralMonitor.Agent.pdb
+C:\Users\opollogati\Desktop\device_monitor\PeripheralMonitor\publish\agent\Shared.pdb
+C:\Users\opollogati\Desktop\device_monitor\PeripheralMonitor\publish\agent\PeripheralMonitor.Agent.exe
