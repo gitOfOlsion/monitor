@@ -1,0 +1,22 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+
+<div class="pm-layout">
+    <nav class="pm-sidebar">
+        <div class="pm-logo">
+            <span class="pm-logo-icon">📡</span>
+            <span class="pm-logo-text">Peripheral Monitor</span>
+        </div>
+        <ul class="pm-nav">
+            <li><NavLink href="/" Match="NavLinkMatch.All">🏠 Dashboard</NavLink></li>
+            <li><NavLink href="/agents">🖥️ Agents</NavLink></li>
+            <li><NavLink href="/events">📋 Events</NavLink></li>
+        </ul>
+        <div class="pm-sidebar-footer">
+            <a href="/logout">🚪 Logout</a>
+        </div>
+    </nav>
+    <main class="pm-main">
+        @Body
+    </main>
+</div>
