@@ -7,51 +7,100 @@ namespace PeripheralMonitor.Shared.Security;
 
 public static class JwtHelper
 {
-    private static readonly string _issuer = "PeripheralMonitor";
-    private static readonly string _audience = "Agent";
-    // ⚠️ In production: store this in Azure Key Vault / environment variable
-    private static readonly byte[] _key = Encoding.UTF8.GetBytes("PeripheralMonitor_SecureKey_32Bytes_32Bytes!!!");
+    private const string Issuer   = "PeripheralMonitor";
+    private const string Audience = "Agent";
 
-    public static string GenerateToken(string machineName, string macAddress)
+    public static string GenerateAgentToken(
+        string machineName,
+        string macAddress,
+        string institutionId,
+        string secretKey,
+        int    expiryDays = 365)
     {
-        var credentials = new SigningCredentials(
-            new SymmetricSecurityKey(_key), SecurityAlgorithms.HmacSha256);
+        var key         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
         var claims = new[]
         {
             new Claim(JwtRegisteredClaimNames.Sub, machineName),
-            new Claim("mac", macAddress),
+            new Claim("mac",             macAddress),
+            new Claim("institution_id",  institutionId),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-            new Claim(JwtRegisteredClaimNames.Iat, DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(), ClaimValueTypes.Integer64)
+            new Claim(JwtRegisteredClaimNames.Iat,
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                ClaimValueTypes.Integer64)
         };
 
         var token = new JwtSecurityToken(
-            issuer: _issuer,
-            audience: _audience,
-            claims: claims,
-            expires: DateTime.UtcNow.AddDays(30),
+            issuer:             Issuer,
+            audience:           Audience,
+            claims:             claims,
+            expires:            DateTime.UtcNow.AddDays(expiryDays),
             signingCredentials: credentials
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
 
-    public static ClaimsPrincipal? ValidateToken(string token)
+    // Template token: no machine/mac — used for provisioning before a machine is known
+    public static string GenerateTemplateToken(
+        string institutionId,
+        string templateId,
+        string secretKey,
+        int    expiryDays = 365)
+    {
+        var key         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+        var credentials = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, $"template:{templateId}"),
+            new Claim("institution_id",  institutionId),
+            new Claim("template_id",     templateId),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new Claim(JwtRegisteredClaimNames.Iat,
+                DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString(),
+                ClaimValueTypes.Integer64)
+        };
+
+        var token = new JwtSecurityToken(
+            issuer:             Issuer,
+            audience:           Audience,
+            claims:             claims,
+            expires:            DateTime.UtcNow.AddDays(expiryDays),
+            signingCredentials: credentials
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    public static ClaimsPrincipal? ValidateToken(string token, string secretKey)
     {
         try
         {
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var validationParams = new TokenValidationParameters
-            {
-                ValidateIssuer = true,
-                ValidateAudience = true,
-                ValidateLifetime = true,
-                ValidateIssuerSigningKey = true,
-                ValidIssuer = _issuer,
-                ValidAudience = _audience,
-                IssuerSigningKey = new SymmetricSecurityKey(_key)
-            };
-            return tokenHandler.ValidateToken(token, validationParams, out _);
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+            return new JwtSecurityTokenHandler().ValidateToken(token,
+                new TokenValidationParameters
+                {
+                    ValidateIssuer           = true,
+                    ValidateAudience         = true,
+                    ValidateLifetime         = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer              = Issuer,
+                    ValidAudience            = Audience,
+                    IssuerSigningKey         = key
+                }, out _);
+        }
+        catch { return null; }
+    }
+
+    public static string? GetClaim(string token, string claimType)
+    {
+        try
+        {
+            var handler = new JwtSecurityTokenHandler();
+            var jwt     = handler.ReadJwtToken(token);
+            return jwt.Claims.FirstOrDefault(c => c.Type == claimType)?.Value;
         }
         catch { return null; }
     }

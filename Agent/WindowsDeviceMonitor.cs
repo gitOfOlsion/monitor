@@ -2,59 +2,39 @@ using System.Collections.Concurrent;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
-using Microsoft.Win32;
 
 namespace PeripheralMonitor.Agent;
 
-/// <summary>
-/// Windows implementation: Layer 2 (SetupAPI snapshot) + Layer 3 (WMI events).
-/// Layer 1 (RegisterDeviceNotification via service handle) is available but disabled
-/// until the agent is installed as a proper Windows Service.
-/// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsDeviceMonitor : IDeviceMonitor
 {
-    private readonly ILogger<WindowsDeviceMonitor>              _logger;
-    private readonly CancellationTokenSource                    _cts = new();
-    private ConcurrentDictionary<string, DeviceInfo>            _snapshot = new();
-    private readonly SemaphoreSlim                              _snapshotLock = new(1, 1);
-    private ManagementEventWatcher?                             _wmiWatcher;
-    private readonly ConcurrentDictionary<string, DateTime>     _recentEvents = new();
+    private readonly ILogger<WindowsDeviceMonitor>               _logger;
+    private readonly CancellationTokenSource                     _cts = new();
+    private ConcurrentDictionary<string, DeviceInfo>             _snapshot = new();
+    private readonly SemaphoreSlim                               _snapshotLock = new(1, 1);
+    private ManagementEventWatcher?                              _wmiWatcher;
+    private readonly ConcurrentDictionary<string, DateTime>      _recentEvents = new();
     private const int DedupWindowSeconds = 2;
 
-    // ── Win32 Constants & Imports ────────────────────────────────────────
-    private const int DIGCF_PRESENT   = 0x00000002;
+    private const int DIGCF_PRESENT    = 0x00000002;
     private const int DIGCF_ALLCLASSES = 0x00000004;
-    private const int SPDRP_DEVICEDESC  = 0x00000000;
-    private const int SPDRP_FRIENDLYNAME = 0x0000000C;
-    private const int SPDRP_CLASS       = 0x00000007;
+    private const int SPDRP_DEVICEDESC  = 0;
+    private const int SPDRP_FRIENDLYNAME = 12;
+    private const int SPDRP_CLASS       = 7;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct SP_DEVINFO_DATA
-    {
-        public int  cbSize;
-        public Guid ClassGuid;
-        public int  DevInst;
-        public IntPtr Reserved;
-    }
+    private struct SP_DEVINFO_DATA { public int cbSize; public Guid ClassGuid; public int DevInst; public IntPtr Reserved; }
 
     [DllImport("setupapi.dll", SetLastError = true)]
-    private static extern IntPtr SetupDiGetClassDevs(IntPtr ClassGuid, string? Enumerator, IntPtr hwndParent, int Flags);
-
+    private static extern IntPtr SetupDiGetClassDevs(IntPtr g, string? e, IntPtr h, int f);
     [DllImport("setupapi.dll", SetLastError = true)]
-    private static extern bool SetupDiEnumDeviceInfo(IntPtr DeviceInfoSet, int MemberIndex, ref SP_DEVINFO_DATA DeviceInfoData);
-
+    private static extern bool SetupDiEnumDeviceInfo(IntPtr s, int i, ref SP_DEVINFO_DATA d);
     [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    private static extern bool SetupDiGetDeviceRegistryProperty(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
-        int Property, out int PropertyRegDataType, System.Text.StringBuilder PropertyBuffer, int PropertyBufferSize, out int RequiredSize);
-
+    private static extern bool SetupDiGetDeviceRegistryProperty(IntPtr s, ref SP_DEVINFO_DATA d, int p, out int t, System.Text.StringBuilder b, int sz, out int r);
     [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Auto)]
-    private static extern bool SetupDiGetDeviceInstanceId(IntPtr DeviceInfoSet, ref SP_DEVINFO_DATA DeviceInfoData,
-        System.Text.StringBuilder DeviceInstanceId, int DeviceInstanceIdSize, out int RequiredSize);
-
+    private static extern bool SetupDiGetDeviceInstanceId(IntPtr s, ref SP_DEVINFO_DATA d, System.Text.StringBuilder id, int sz, out int r);
     [DllImport("setupapi.dll")]
-    private static extern bool SetupDiDestroyDeviceInfoList(IntPtr DeviceInfoSet);
-
+    private static extern bool SetupDiDestroyDeviceInfoList(IntPtr s);
     private static readonly IntPtr INVALID_HANDLE = new(-1);
 
     public event Func<string, DeviceInfo, Task>? DeviceChanged;
@@ -64,48 +44,37 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
     public async Task StartAsync(CancellationToken ct = default)
     {
         _snapshot = await TakeSnapshotAsync();
-        _logger.LogInformation("Windows monitor: initial snapshot {Count} devices", _snapshot.Count);
-
-        StartSnapshotReconciliation();
+        _logger.LogInformation("Windows monitor: {Count} devices in initial snapshot", _snapshot.Count);
+        StartSnapshotPoller();
         StartWmiWatcher();
-
-        _logger.LogInformation("WindowsDeviceMonitor started (SetupAPI + WMI)");
     }
 
-    public async Task<IReadOnlyList<DeviceInfo>> GetSnapshotAsync()
-    {
-        var snap = await TakeSnapshotAsync();
-        return snap.Values.ToList();
-    }
+    public Task<IReadOnlyList<DeviceInfo>> GetSnapshotAsync()
+        => Task.FromResult<IReadOnlyList<DeviceInfo>>(_snapshot.Values.ToList());
 
-    // ── Layer 2: SetupAPI polling ────────────────────────────────────────
-    private void StartSnapshotReconciliation()
+    private void StartSnapshotPoller()
     {
         _ = Task.Run(async () =>
         {
             while (!_cts.Token.IsCancellationRequested)
             {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token);
-                    await RefreshSnapshotAsync();
-                }
+                try { await Task.Delay(TimeSpan.FromSeconds(30), _cts.Token); await RefreshAsync(); }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogWarning(ex, "Snapshot reconciliation error"); }
+                catch (Exception ex) { _logger.LogWarning(ex, "Snapshot poll error"); }
             }
-        }, _cts.Token);
+        });
     }
 
-    private async Task RefreshSnapshotAsync()
+    private async Task RefreshAsync()
     {
         if (!await _snapshotLock.WaitAsync(TimeSpan.FromSeconds(5))) return;
         try
         {
             var next = await TakeSnapshotAsync();
-            foreach (var id in next.Keys.Except(_snapshot.Keys))
-                await FireEventAsync("Connected", next[id]);
-            foreach (var id in _snapshot.Keys.Except(next.Keys))
-                await FireEventAsync("Disconnected", _snapshot[id]);
+            foreach (var id in next.Keys.Except(_snapshot.Keys).ToList())
+                await FireAsync("Connected",    next[id]);
+            foreach (var id in _snapshot.Keys.Except(next.Keys).ToList())
+                await FireAsync("Disconnected", _snapshot[id]);
             _snapshot = next;
         }
         finally { _snapshotLock.Release(); }
@@ -113,42 +82,39 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
 
     private Task<ConcurrentDictionary<string, DeviceInfo>> TakeSnapshotAsync() => Task.Run(() =>
     {
-        var result    = new ConcurrentDictionary<string, DeviceInfo>(StringComparer.OrdinalIgnoreCase);
-        var hDevInfo  = SetupDiGetClassDevs(IntPtr.Zero, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
+        var result   = new ConcurrentDictionary<string, DeviceInfo>(StringComparer.OrdinalIgnoreCase);
+        var hDevInfo = SetupDiGetClassDevs(IntPtr.Zero, null, IntPtr.Zero, DIGCF_PRESENT | DIGCF_ALLCLASSES);
         if (hDevInfo == INVALID_HANDLE) return result;
         try
         {
-            var devInfoData = new SP_DEVINFO_DATA { cbSize = Marshal.SizeOf<SP_DEVINFO_DATA>() };
-            for (int i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, ref devInfoData); i++)
+            var d = new SP_DEVINFO_DATA { cbSize = Marshal.SizeOf<SP_DEVINFO_DATA>() };
+            for (int i = 0; SetupDiEnumDeviceInfo(hDevInfo, i, ref d); i++)
             {
                 try
                 {
                     var idBuf = new System.Text.StringBuilder(512);
-                    if (!SetupDiGetDeviceInstanceId(hDevInfo, ref devInfoData, idBuf, idBuf.Capacity, out _)) continue;
-                    var deviceId  = idBuf.ToString();
-                    var name      = GetProp(hDevInfo, ref devInfoData, SPDRP_FRIENDLYNAME)
-                                 ?? GetProp(hDevInfo, ref devInfoData, SPDRP_DEVICEDESC)
-                                 ?? "Unknown Device";
-                    var category  = GetProp(hDevInfo, ref devInfoData, SPDRP_CLASS) ?? "Other";
-                    result[deviceId] = new DeviceInfo(deviceId, name, MapCategory(category), "OK");
+                    if (!SetupDiGetDeviceInstanceId(hDevInfo, ref d, idBuf, idBuf.Capacity, out _)) continue;
+                    var deviceId = idBuf.ToString();
+                    var name     = GetProp(hDevInfo, ref d, SPDRP_FRIENDLYNAME)
+                                ?? GetProp(hDevInfo, ref d, SPDRP_DEVICEDESC) ?? "Unknown Device";
+                    var cls      = GetProp(hDevInfo, ref d, SPDRP_CLASS) ?? "Other";
+                    result[deviceId] = new DeviceInfo(deviceId, name, MapCategory(cls), "OK");
                 }
-                catch { /* skip malformed */ }
-                devInfoData.cbSize = Marshal.SizeOf<SP_DEVINFO_DATA>();
+                catch { }
+                d.cbSize = Marshal.SizeOf<SP_DEVINFO_DATA>();
             }
         }
         finally { SetupDiDestroyDeviceInfoList(hDevInfo); }
         return result;
     });
 
-    private static string? GetProp(IntPtr hDevInfo, ref SP_DEVINFO_DATA data, int prop)
+    private static string? GetProp(IntPtr h, ref SP_DEVINFO_DATA d, int p)
     {
-        var buf = new System.Text.StringBuilder(512);
-        return SetupDiGetDeviceRegistryProperty(hDevInfo, ref data, prop, out _, buf, buf.Capacity, out _)
-            ? (buf.ToString().Trim() is { Length: > 0 } s ? s : null)
-            : null;
+        var b = new System.Text.StringBuilder(512);
+        return SetupDiGetDeviceRegistryProperty(h, ref d, p, out _, b, b.Capacity, out _)
+            ? b.ToString().Trim() is { Length: > 0 } s ? s : null : null;
     }
 
-    // ── Layer 3: WMI ────────────────────────────────────────────────────
     private void StartWmiWatcher()
     {
         try
@@ -156,20 +122,18 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
             var scope = new ManagementScope(@"\\.\root\CIMV2");
             scope.Options.Timeout = TimeSpan.FromSeconds(10);
             scope.Connect();
-
-            var query = new WqlEventQuery("__InstanceOperationEvent",
-                TimeSpan.FromSeconds(2), "TargetInstance ISA 'Win32_PnPEntity'");
-
+            var query = new WqlEventQuery("__InstanceOperationEvent", TimeSpan.FromSeconds(2),
+                "TargetInstance ISA 'Win32_PnPEntity'");
             _wmiWatcher = new ManagementEventWatcher(scope, query);
             _wmiWatcher.Options.Timeout = TimeSpan.FromSeconds(20);
-            _wmiWatcher.EventArrived   += OnWmiEvent;
+            _wmiWatcher.EventArrived   += OnWmi;
             _wmiWatcher.Start();
             _logger.LogInformation("WMI watcher active");
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "WMI watcher failed to start"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "WMI watcher failed"); }
     }
 
-    private async void OnWmiEvent(object sender, EventArrivedEventArgs e)
+    private async void OnWmi(object sender, EventArrivedEventArgs e)
     {
         try
         {
@@ -180,26 +144,21 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
                 _ => ""
             };
             if (string.IsNullOrEmpty(action)) return;
-
-            var target   = (ManagementBaseObject)e.NewEvent["TargetInstance"];
-            var pnpClass = target["PNPClass"]?.ToString() ?? "Other";
+            var t = (ManagementBaseObject)e.NewEvent["TargetInstance"];
+            var pnpClass = t["PNPClass"]?.ToString() ?? "Other";
             if (ShouldSkip(pnpClass)) return;
-
             var device = new DeviceInfo(
-                DeviceId:     target["DeviceID"]?.ToString() ?? "",
-                FriendlyName: target["Name"]?.ToString() ?? target["Caption"]?.ToString() ?? "Unknown Device",
-                Category:     MapCategory(pnpClass),
-                Status:       target["Status"]?.ToString() ?? "OK"
-            );
-
-            await FireEventAsync(action, device);
-            await RefreshSnapshotAsync();
+                t["DeviceID"]?.ToString() ?? "",
+                t["Name"]?.ToString() ?? t["Caption"]?.ToString() ?? "Unknown Device",
+                MapCategory(pnpClass),
+                t["Status"]?.ToString() ?? "OK");
+            await FireAsync(action, device);
+            await RefreshAsync();
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "WMI event handler error"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "WMI event error"); }
     }
 
-    // ── Shared helpers ───────────────────────────────────────────────────
-    private async Task FireEventAsync(string action, DeviceInfo device)
+    private async Task FireAsync(string action, DeviceInfo device)
     {
         var key = $"{action}:{device.DeviceId}";
         var now = DateTime.UtcNow;
@@ -208,10 +167,11 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
         foreach (var old in _recentEvents.Where(kv => (now - kv.Value).TotalSeconds > 60).ToList())
             _recentEvents.TryRemove(old.Key, out _);
         try { if (DeviceChanged != null) await DeviceChanged(action, device); }
-        catch (Exception ex) { _logger.LogWarning(ex, "DeviceChanged handler error"); }
+        catch (Exception ex) { _logger.LogWarning(ex, "DeviceChanged error"); }
     }
 
-    private static string MapCategory(string raw) => raw.ToLowerInvariant() switch
+    // Maps Windows class name → DeviceCategory.Name (matches DB seed)
+    public static string MapCategory(string raw) => raw.ToLowerInvariant() switch
     {
         "keyboard"      => "Keyboard",
         "mouse"         => "Mouse",
@@ -226,10 +186,10 @@ public sealed class WindowsDeviceMonitor : IDeviceMonitor
         "bluetooth"     => "Bluetooth",
         "net"           => "Network",
         "camera"        => "Camera",
-        "image"         => "Camera/Scanner",
+        "image"         => "Camera",
         "printer"       => "Printer",
-        "ports"         => "Serial/Parallel Port",
-        _               => raw
+        "ports"         => "Serial Port",
+        _               => "Other"
     };
 
     private static bool ShouldSkip(string c) =>

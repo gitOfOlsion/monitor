@@ -1,77 +1,154 @@
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
 using System.Text;
-using PeripheralMonitor.Server;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using PeripheralMonitor.Server.Data;
+using PeripheralMonitor.Server.Hubs;
 using PeripheralMonitor.Server.Services;
-using PeripheralMonitor.Shared.Models;
-using PeripheralMonitor.Shared.Security;
+using Serilog;
+using Serilog.Events;
 
-var builder = WebApplication.CreateBuilder(args);
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-// 1. Register Services
-builder.Services.AddSingleton<AgentRegistry>();
-builder.Services.AddSingleton<DiscoveryListener>();
-builder.Services.AddHostedService<DiscoveryHostedService>();
-
-// 2. SignalR
-builder.Services.AddSignalR();
-
-// 3. JWT (Kept for compatibility, but we will disable enforcement below)
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options => { /* config omitted for brevity */ });
-
-// 4. CORS
-builder.Services.AddCors(options =>
+try
 {
-    options.AddPolicy("AllowAll", policy =>
-        policy
-            .AllowAnyMethod()
-            .AllowAnyHeader()
-            .SetIsOriginAllowed(_ => true)
-            .AllowCredentials());
-});
+    var builder = WebApplication.CreateBuilder(args);
 
-var app = builder.Build();
-app.UseDeveloperExceptionPage();
-app.UseCors("AllowAll");
-app.UseRouting();
-//app.UseAuthentication();
-//app.UseAuthorization();
+    // ── Serilog ───────────────────────────────────────────────────────────
+    builder.Host.UseSerilog((ctx, services, cfg) =>
+        cfg.ReadFrom.Configuration(ctx.Configuration)
+           .ReadFrom.Services(services)
+           .Enrich.FromLogContext()
+           .Enrich.WithMachineName()
+           .Enrich.WithProperty("Application", "Server")
+           .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+           .WriteTo.Seq(ctx.Configuration["Seq:Url"] ?? "http://seq:5341"));
 
-// === PUBLIC ENDPOINTS (NO PASSWORD REQUIRED) ===
-app.MapGet("/", () => "Server Running");
-app.MapGet("/health", () => new { status = "ok", timestamp = DateTime.UtcNow });
+    // ── Database ──────────────────────────────────────────────────────────
+    builder.Services.AddDbContextFactory<AppDbContext>(opts =>
+        opts.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
 
-// ✅ THIS IS THE MISSING ENDPOINT THAT CAUSED THE 404
-app.MapGet("/api/agents", (AgentRegistry registry) => 
-    Results.Json(registry.GetAll()));
-
-app.MapPost("/api/agents/{macAddress}/approve", (string macAddress, string approvedBy, AgentRegistry registry) =>
-{
-    var success = registry.Approve(macAddress, approvedBy);
-    if (!success)
-        return Results.NotFound(new { message = $"Agent {macAddress} not found or already approved" });
-
-    // ✅ Read back the approved agent to get the generated token
-    registry.TryGetAgent(macAddress, out var agent);
-    return Results.Ok(new
+    // ── Identity (table = Users) ──────────────────────────────────────────
+    builder.Services.AddIdentity<User, IdentityRole>(opts =>
     {
-        message = $"{macAddress} approved by {approvedBy}",
-        token   = agent?.JwtToken
+        opts.Password.RequireDigit           = true;
+        opts.Password.RequiredLength         = 8;
+        opts.Password.RequireNonAlphanumeric = false;
+        opts.SignIn.RequireConfirmedAccount   = false;
+    })
+    .AddEntityFrameworkStores<AppDbContext>()
+    .AddDefaultTokenProviders();
+
+    // ── JWT (agents) ──────────────────────────────────────────────────────
+    var jwtSecret = builder.Configuration["Jwt:Secret"]
+        ?? throw new InvalidOperationException("Jwt:Secret required");
+    var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
+
+    builder.Services.AddAuthentication(opts =>
+    {
+        opts.DefaultAuthenticateScheme = "Smart";
+        opts.DefaultChallengeScheme    = "Smart";
+    })
+    .AddPolicyScheme("Smart", "Smart Auth", opts =>
+    {
+        opts.ForwardDefaultSelector = ctx =>
+        {
+            var path = ctx.Request.Path;
+            if (path.StartsWithSegments("/monitor") || path.StartsWithSegments("/api/agent"))
+                return JwtBearerDefaults.AuthenticationScheme;
+            return IdentityConstants.ApplicationScheme;
+        };
+    })
+    .AddJwtBearer(opts =>
+    {
+        opts.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer           = true,
+            ValidateAudience         = true,
+            ValidateLifetime         = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer              = "PeripheralMonitor",
+            ValidAudience            = "Agent",
+            IssuerSigningKey         = jwtKey
+        };
+        opts.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = ctx =>
+            {
+                var token = ctx.Request.Query["access_token"];
+                if (!string.IsNullOrEmpty(token) &&
+                    ctx.HttpContext.Request.Path.StartsWithSegments("/monitor"))
+                    ctx.Token = token;
+                return Task.CompletedTask;
+            }
+        };
     });
-});
 
-// ✅ ADD THIS TOO (for the Delete button)
-app.MapDelete("/api/agents/{macAddress}", (string macAddress, AgentRegistry registry) =>
-{
-    var success = registry.Delete(macAddress);
-    return success
-        ? Results.Ok()
-        : Results.NotFound(new { message = $"Agent {macAddress} not found" });
-});
+    builder.Services.AddAuthorization(opts =>
+    {
+        opts.AddPolicy("AgentOrDashboard", p => p.RequireAuthenticatedUser());
+    });
 
+    // ── SignalR ───────────────────────────────────────────────────────────
+    builder.Services.AddSignalR(opts =>
+    {
+        opts.EnableDetailedErrors      = builder.Environment.IsDevelopment();
+        opts.MaximumReceiveMessageSize = 512 * 1024;
+        opts.KeepAliveInterval         = TimeSpan.FromSeconds(15);
+        opts.ClientTimeoutInterval     = TimeSpan.FromSeconds(60);
+    });
 
-// ✅ SIGNALR HUB (NO PASSWORD REQUIRED FOR TESTING)
-app.MapHub<MonitorHub>("/monitor"); 
+    // ── CORS ──────────────────────────────────────────────────────────────
+    builder.Services.AddCors(opts =>
+        opts.AddPolicy("DevCors", p =>
+            p.AllowAnyMethod().AllowAnyHeader()
+             .SetIsOriginAllowed(_ => true).AllowCredentials()));
 
-app.Run("http://0.0.0.0:5000");
+    // ── Services ──────────────────────────────────────────────────────────
+    builder.Services.AddScoped<AgentService>();
+    builder.Services.AddScoped<InstitutionService>();
+    builder.Services.AddHostedService<DiscoveryHostedService>();
+    builder.Services.AddHostedService<OfflineDetectorService>();
+    builder.Services.AddControllers();
+
+    var app = builder.Build();
+
+    // ── Startup: migrate + seed ───────────────────────────────────────────
+    using (var scope = app.Services.CreateScope())
+    {
+        var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.MigrateAsync();
+
+        var roleMgr  = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        var userMgr  = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+
+        foreach (var role in new[] { "SuperAdmin", "InstitutionAdmin", "Viewer" })
+            if (!await roleMgr.RoleExistsAsync(role))
+                await roleMgr.CreateAsync(new IdentityRole(role));
+
+        var adminPass = app.Configuration["AdminPassword"] ?? "Admin@1234!";
+        if (await userMgr.FindByNameAsync("admin") == null)
+        {
+            var admin = new User { UserName = "admin", Email = "admin@local", CreatedAt = DateTime.UtcNow };
+            await userMgr.CreateAsync(admin, adminPass);
+            await userMgr.AddToRoleAsync(admin, "SuperAdmin");
+        }
+    }
+
+    app.UseSerilogRequestLogging();
+    if (app.Environment.IsDevelopment()) app.UseCors("DevCors");
+    app.UseAuthentication();
+    app.UseAuthorization();
+    app.MapControllers();
+    app.MapHub<MonitorHub>("/monitor");
+    app.MapGet("/health", () => Results.Ok(new { status = "ok", ts = DateTime.UtcNow }));
+
+    await app.RunAsync();
+}
+catch (Exception ex) { Log.Fatal(ex, "Server terminated"); return 1; }
+finally { await Log.CloseAndFlushAsync(); }
+return 0;
