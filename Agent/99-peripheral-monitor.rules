@@ -1,0 +1,10 @@
+# /etc/udev/rules.d/99-peripheral-monitor.rules
+# Sends device add/remove events to the agent via a named pipe
+# Install: sudo cp 99-peripheral-monitor.rules /etc/udev/rules.d/ && sudo udevadm control --reload-rules
+
+ACTION=="add", SUBSYSTEM=="usb",   RUN+="/bin/sh -c 'echo add|$env{DEVPATH}|usb|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
+ACTION=="remove", SUBSYSTEM=="usb", RUN+="/bin/sh -c 'echo remove|$env{DEVPATH}|usb|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
+ACTION=="add", SUBSYSTEM=="input", RUN+="/bin/sh -c 'echo add|$env{DEVPATH}|input|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
+ACTION=="remove", SUBSYSTEM=="input", RUN+="/bin/sh -c 'echo remove|$env{DEVPATH}|input|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
+ACTION=="add", SUBSYSTEM=="bluetooth", RUN+="/bin/sh -c 'echo add|$env{DEVPATH}|bluetooth|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
+ACTION=="remove", SUBSYSTEM=="bluetooth", RUN+="/bin/sh -c 'echo remove|$env{DEVPATH}|bluetooth|$env{ID_MODEL} >> /run/peripheral-monitor/udev-events'"
