@@ -1,0 +1,136 @@
+@page "/agents"
+@using PeripheralMonitor.Server.Data
+@using PeripheralMonitor.Web.Services
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ServerApiClient Api
+
+<PageTitle>Agents — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Agents</h1>
+    <button class="pm-btn pm-btn-secondary" @onclick="RefreshAsync">↻ Refresh</button>
+</div>
+
+@if (_loading)
+{
+    <div class="pm-loading">Loading agents...</div>
+}
+else
+{
+    <div class="pm-table-wrapper">
+        <table class="pm-table">
+            <thead>
+                <tr>
+                    <th>Machine</th>
+                    <th>Platform</th>
+                    <th>IP Address</th>
+                    <th>MAC Address</th>
+                    <th>Status</th>
+                    <th>Last Heartbeat</th>
+                    <th>Devices</th>
+                    <th>Approved By</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var agent in _agents)
+                {
+                    <tr>
+                        <td><strong>@agent.MachineName</strong></td>
+                        <td>@GetPlatformIcon(agent.Platform) @agent.Platform</td>
+                        <td>@agent.IPAddress</td>
+                        <td><code>@agent.MacAddress</code></td>
+                        <td><span class="pm-badge pm-badge-@agent.Status.ToLower()">@agent.Status</span></td>
+                        <td>@(agent.LastHeartbeat?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "Never")</td>
+                        <td>@agent.DeviceCount</td>
+                        <td>@(agent.ApprovedBy ?? "—")</td>
+                        <td class="pm-actions">
+                            @if (agent.Status == "Pending")
+                            {
+                                <button class="pm-btn pm-btn-success pm-btn-sm"
+                                        @onclick="() => ApproveAsync(agent.MacAddress)">✓ Approve</button>
+                                <button class="pm-btn pm-btn-danger pm-btn-sm"
+                                        @onclick="() => RejectAsync(agent.MacAddress)">✗ Reject</button>
+                            }
+                            @if (agent.Status != "Approved")
+                            {
+                                <button class="pm-btn pm-btn-danger pm-btn-sm"
+                                        @onclick="() => DeleteAsync(agent.MacAddress)">🗑 Delete</button>
+                            }
+                            @if (agent.Status == "Approved")
+                            {
+                                <button class="pm-btn pm-btn-secondary pm-btn-sm"
+                                        @onclick="() => ReApproveAsync(agent.MacAddress)">↻ Re-issue Token</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (!_agents.Any())
+    {
+        <div class="pm-empty">
+            No agents discovered yet. Install and run the agent on a Windows or Linux machine on your network.
+        </div>
+    }
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="pm-toast @(_messageIsError ? "pm-toast-error" : "pm-toast-success")">@_message</div>
+}
+
+@code {
+    private List<AgentEntity> _agents = [];
+    private bool   _loading = true;
+    private string? _message;
+    private bool   _messageIsError;
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        _agents  = await Api.GetAgentsAsync() ?? [];
+        _loading = false;
+    }
+
+    private async Task ApproveAsync(string mac)
+    {
+        var ok = await Api.ApproveAgentAsync(mac);
+        ShowMessage(ok ? "Agent approved successfully." : "Failed to approve agent.", !ok);
+        if (ok) await RefreshAsync();
+    }
+
+    private async Task ReApproveAsync(string mac) => await ApproveAsync(mac);
+
+    private async Task RejectAsync(string mac)
+    {
+        var ok = await Api.RejectAgentAsync(mac);
+        ShowMessage(ok ? "Agent rejected." : "Failed.", !ok);
+        if (ok) await RefreshAsync();
+    }
+
+    private async Task DeleteAsync(string mac)
+    {
+        var ok = await Api.DeleteAgentAsync(mac);
+        ShowMessage(ok ? "Agent deleted." : "Failed — approved agents cannot be deleted.", !ok);
+        if (ok) await RefreshAsync();
+    }
+
+    private void ShowMessage(string msg, bool isError)
+    {
+        _message = msg; _messageIsError = isError;
+        _ = Task.Delay(4000).ContinueWith(_ => { _message = null; InvokeAsync(StateHasChanged); });
+        StateHasChanged();
+    }
+
+    private static string GetPlatformIcon(string platform) => platform switch
+    {
+        "Windows" => "🪟",
+        "Linux"   => "🐧",
+        _ => "❓"
+    };
+}

@@ -1,0 +1,61 @@
+@page "/login"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authentication
+@inject IHttpContextAccessor HttpCtx
+@inject NavigationManager Nav
+
+<PageTitle>Login — Peripheral Monitor</PageTitle>
+
+<div class="pm-login-page">
+    <div class="pm-login-card">
+        <h1>🔐 Peripheral Monitor</h1>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="pm-alert pm-alert-error">@_error</div>
+        }
+
+        <EditForm Model="_model" OnValidSubmit="HandleLogin" FormName="login">
+            <DataAnnotationsValidator />
+            <div class="pm-field">
+                <label>Username</label>
+                <InputText @bind-Value="_model.Username" class="pm-input" autocomplete="username" />
+            </div>
+            <div class="pm-field">
+                <label>Password</label>
+                <InputText @bind-Value="_model.Password" type="password" class="pm-input" autocomplete="current-password" />
+            </div>
+            <button type="submit" class="pm-btn pm-btn-primary" disabled="@_loading">
+                @(_loading ? "Signing in..." : "Sign in")
+            </button>
+        </EditForm>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromForm]
+    private LoginModel _model { get; set; } = new();
+    private string? _error;
+    private bool _loading;
+
+    [Parameter, SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    // Note: In Blazor Server the login must be done via a traditional POST endpoint
+    // because HttpContext.SignInAsync requires a real HTTP response.
+    // This form submits to /api/auth/login endpoint.
+
+    private async Task HandleLogin()
+    {
+        _loading = true;
+        _error   = null;
+        // Navigate to server-side login handler
+        Nav.NavigateTo($"/api/auth/login?username={Uri.EscapeDataString(_model.Username)}&password={Uri.EscapeDataString(_model.Password)}&returnUrl={Uri.EscapeDataString(ReturnUrl ?? "/")}", forceLoad: true);
+    }
+
+    public class LoginModel
+    {
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

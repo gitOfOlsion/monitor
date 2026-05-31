@@ -1,0 +1,111 @@
+@page "/"
+@using PeripheralMonitor.Server.Data
+@using PeripheralMonitor.Shared.Models
+@using PeripheralMonitor.Web.Services
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+@inject ServerApiClient Api
+@inject RealtimeService Realtime
+
+<PageTitle>Dashboard — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Dashboard</h1>
+    <span class="pm-hub-status @(Realtime.State == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected ? "connected" : "disconnected")">
+        ● @Realtime.State
+    </span>
+</div>
+
+<!-- Stats row -->
+<div class="pm-stats-row">
+    <div class="pm-stat-card">
+        <div class="pm-stat-value">@_agents.Count</div>
+        <div class="pm-stat-label">Total Agents</div>
+    </div>
+    <div class="pm-stat-card pm-stat-green">
+        <div class="pm-stat-value">@_agents.Count(a => a.Status == "Approved")</div>
+        <div class="pm-stat-label">Online / Approved</div>
+    </div>
+    <div class="pm-stat-card pm-stat-orange">
+        <div class="pm-stat-value">@_agents.Count(a => a.Status == "Pending")</div>
+        <div class="pm-stat-label">Pending Approval</div>
+    </div>
+    <div class="pm-stat-card">
+        <div class="pm-stat-value">@_events.Count</div>
+        <div class="pm-stat-label">Recent Events</div>
+    </div>
+</div>
+
+<!-- Live event feed -->
+<div class="pm-section">
+    <h2>Live Event Feed</h2>
+    <div class="pm-event-feed">
+        @foreach (var ev in _events.Take(50))
+        {
+            <div class="pm-event-row pm-event-@ev.EventType.ToLower()">
+                <span class="pm-event-icon">@GetEventIcon(ev.EventType)</span>
+                <span class="pm-event-machine">@ev.MachineName</span>
+                <span class="pm-event-type">@ev.EventType</span>
+                <span class="pm-event-name">@ev.FriendlyName</span>
+                <span class="pm-event-category">@ev.Category</span>
+                <span class="pm-event-time">@ev.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+            </div>
+        }
+        @if (!_events.Any())
+        {
+            <div class="pm-empty">Waiting for device events...</div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<AgentEntity>       _agents = [];
+    private List<DeviceChangedPayload> _events = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Realtime.EnsureConnectedAsync();
+        Realtime.OnHeartbeat     += HandleHeartbeat;
+        Realtime.OnDeviceChanged += HandleDeviceChanged;
+
+        _agents = await Api.GetAgentsAsync() ?? [];
+        var dbEvents = await Api.GetEventsAsync(100) ?? [];
+        _events = dbEvents.Select(e => new DeviceChangedPayload(
+            e.MachineName, e.EventType, e.DeviceId, e.FriendlyName, e.Category, e.Status, e.Timestamp
+        )).ToList();
+    }
+
+    private void HandleHeartbeat(HeartbeatPayload p)
+    {
+        var agent = _agents.FirstOrDefault(a => a.MachineName == p.MachineName);
+        if (agent != null)
+        {
+            agent.LastHeartbeat = p.Timestamp;
+            agent.DeviceCount   = p.DeviceCount;
+            agent.Status        = "Approved";
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HandleDeviceChanged(DeviceChangedPayload p)
+    {
+        _events.Insert(0, p);
+        if (_events.Count > 200) _events.RemoveAt(200);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private static string GetEventIcon(string eventType) => eventType switch
+    {
+        "Connected"    => "🔌",
+        "Disconnected" => "⚠️",
+        "Modified"     => "🔄",
+        _ => "📋"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        Realtime.OnHeartbeat     -= HandleHeartbeat;
+        Realtime.OnDeviceChanged -= HandleDeviceChanged;
+        await Task.CompletedTask;
+    }
+}
