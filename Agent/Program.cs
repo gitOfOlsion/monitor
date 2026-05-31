@@ -1,32 +1,54 @@
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using PeripheralMonitor.Agent;
 using PeripheralMonitor.Agent.Services;
-using System.IO;
+using Serilog;
+using Serilog.Events;
 
-// ✅ Critical: Set content root to executable directory (fixes Windows Service config loading)
-//var exeDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location) 
-             //?? Environment.CurrentDirectory;
-var exeDir = AppContext.BaseDirectory;  // ✅ More reliable way to get executable directory
+var exeDir = AppContext.BaseDirectory;
 
-var host = Host.CreateDefaultBuilder(args)
-    .UseWindowsService()
-    .ConfigureHostConfiguration(config =>
-    {
-        config.SetBasePath(exeDir);  // ✅ Force config to load from exe folder
-    })
-    .ConfigureAppConfiguration((context, config) =>
-    {
-        config.SetBasePath(exeDir);  // ✅ Redundant but safe
-        config.AddJsonFile("appsettings.json", optional: true, reloadOnChange: true);
-        config.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: true);  // ✅ JWT token file
-        config.AddEnvironmentVariables();
-    })
-    .ConfigureServices((context, services) =>
-    {
-        services.AddHostedService<AgentWorker>();
-        services.AddSingleton<DiscoveryService>();
-    })
-    .Build();
+Log.Logger = new LoggerConfiguration()
+    .MinimumLevel.Debug()
+    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .CreateBootstrapLogger();
 
-await host.RunAsync();
+try
+{
+    var host = Host.CreateDefaultBuilder(args)
+        .UseContentRoot(exeDir)
+        .ConfigureHostConfiguration(c => c.SetBasePath(exeDir))
+        .ConfigureAppConfiguration((_, c) =>
+        {
+            c.SetBasePath(exeDir);
+            c.AddJsonFile("appsettings.json",       optional: true, reloadOnChange: true);
+            c.AddJsonFile("appsettings.local.json",  optional: true, reloadOnChange: true);
+            c.AddEnvironmentVariables(prefix: "PM_");
+        })
+        .UseSerilog((ctx, services, cfg) =>
+            cfg.ReadFrom.Configuration(ctx.Configuration)
+               .ReadFrom.Services(services)
+               .Enrich.FromLogContext()
+               .Enrich.WithMachineName()
+               .Enrich.WithProperty("Application", "Agent")
+               .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
+               .WriteTo.File(Path.Combine(exeDir, "logs", "agent-.log"),
+                   rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14)
+               .WriteTo.Seq(ctx.Configuration["Seq:Url"] ?? "http://localhost:5341"))
+        .ConfigureServices((ctx, services) =>
+        {
+            services.AddSingleton<DiscoveryService>();
+            services.AddSingleton<IDeviceMonitor>(sp =>
+            {
+                if (OperatingSystem.IsWindows())
+                    return new WindowsDeviceMonitor(sp.GetRequiredService<ILogger<WindowsDeviceMonitor>>());
+                return new LinuxDeviceMonitor(sp.GetRequiredService<ILogger<LinuxDeviceMonitor>>());
+            });
+            services.AddHostedService<AgentWorker>();
+        })
+        .Build();
+
+    await host.RunAsync();
+    return 0;
+}
+catch (Exception ex) { Log.Fatal(ex, "Agent terminated"); return 1; }
+finally { await Log.CloseAndFlushAsync(); }
