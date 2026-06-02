@@ -1,0 +1,114 @@
+version: "3.9"
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: pm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       peripheral_monitor
+      POSTGRES_USER:     pm_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm_user -d peripheral_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Seq (structured log viewer) ─────────────────────────────────────────
+  seq:
+    image: datalust/seq:latest
+    container_name: pm_seq
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+    volumes:
+      - seq_data:/data
+    networks:
+      - internal
+    # Seq UI exposed ONLY internally — Caddy will proxy it
+    expose:
+      - "80"
+      - "5341"
+
+  # ── Server (API + SignalR hub) ──────────────────────────────────────────
+  server:
+    build:
+      context: .
+      dockerfile: Server/Dockerfile
+    container_name: pm_server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT:              Production
+      ConnectionStrings__Postgres:        "Host=db;Port=5432;Database=peripheral_monitor;Username=pm_user;Password=${DB_PASSWORD}"
+      Jwt__Secret:                         ${JWT_SECRET}
+      AdminPassword:                       ${ADMIN_PASSWORD}
+      Seq__Url:                            http://seq:5341
+    networks:
+      - internal
+    expose:
+      - "5000"
+    # UDP discovery port — must be accessible from LAN agents
+    ports:
+      - "5001:5001/udp"
+
+  # ── Web (Blazor Server dashboard) ───────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: Web/Dockerfile
+    container_name: pm_web
+    restart: unless-stopped
+    depends_on:
+      - server
+      - seq
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ServerApiUrl:           http://server:5000
+      Auth__AdminUsername:    admin
+      Auth__AdminPassword:    ${ADMIN_PASSWORD}
+      Seq__Url:               http://seq:5341
+    networks:
+      - internal
+    expose:
+      - "5001"
+
+  # ── Caddy (reverse proxy + HTTPS) ────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: pm_caddy
+    restart: unless-stopped
+    depends_on:
+      - web
+      - server
+      - seq
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+
+volumes:
+  pg_data:
+  seq_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
