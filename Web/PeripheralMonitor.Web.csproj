@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <!-- TargetFramework, Nullable, ImplicitUsings inherited from Directory.Build.props -->
+  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
-    <PackageReference Include="Serilog.AspNetCore" />
-    <PackageReference Include="Serilog.Sinks.Seq" />
-    <PackageReference Include="Serilog.Settings.Configuration" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Serilog.AspNetCore"                  Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Include="Serilog.Sinks.Seq"                   Version="$(SerilogSeqVersion)" />
+    <PackageReference Include="Serilog.Settings.Configuration"      Version="$(SerilogConfigVersion)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />

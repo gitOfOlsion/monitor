@@ -1,17 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
-  <!-- TargetFramework, Nullable, ImplicitUsings inherited from Directory.Build.props -->
+  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="Serilog.Extensions.Hosting" />
-    <PackageReference Include="Serilog.Sinks.Console" />
-    <PackageReference Include="Serilog.Sinks.File" />
-    <PackageReference Include="Serilog.Sinks.Seq" />
-    <PackageReference Include="Serilog.Settings.Configuration" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Hosting"        Version="$(ExtensionsVersion)" />
+    <PackageReference Include="Serilog.Extensions.Hosting"          Version="$(SerilogHostingVersion)" />
+    <PackageReference Include="Serilog.Sinks.Console"               Version="$(SerilogConsoleVersion)" />
+    <PackageReference Include="Serilog.Sinks.File"                  Version="$(SerilogFileVersion)" />
+    <PackageReference Include="Serilog.Sinks.Seq"                   Version="$(SerilogSeqVersion)" />
+    <PackageReference Include="Serilog.Settings.Configuration"      Version="$(SerilogConfigVersion)" />
   </ItemGroup>
   <!-- Windows-only service host -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(ExtensionsVersion)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />
