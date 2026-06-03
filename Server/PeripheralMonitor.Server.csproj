@@ -1,15 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <!-- TargetFramework, Nullable, ImplicitUsings inherited from Directory.Build.props -->
+  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" />
-    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
-    <PackageReference Include="Serilog.AspNetCore" />
-    <PackageReference Include="Serilog.Sinks.Seq" />
-    <PackageReference Include="Serilog.Enrichers.Environment" />
-    <PackageReference Include="Serilog.Enrichers.Thread" />
-    <PackageReference Include="Serilog.Settings.Configuration" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer"     Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"              Version="$(EfCoreVersion)" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"             Version="$(NpgsqlEfVersion)" />
+    <PackageReference Include="Serilog.AspNetCore"                                Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Include="Serilog.Sinks.Seq"                                 Version="$(SerilogSeqVersion)" />
+    <PackageReference Include="Serilog.Enrichers.Environment"                     Version="$(SerilogEnvVersion)" />
+    <PackageReference Include="Serilog.Enrichers.Thread"                          Version="$(SerilogThreadVersion)" />
+    <PackageReference Include="Serilog.Settings.Configuration"                    Version="$(SerilogConfigVersion)" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />

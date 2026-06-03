@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- TargetFramework, Nullable, ImplicitUsings inherited from Directory.Build.props -->
+  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
   <ItemGroup>
-    <PackageReference Include="Microsoft.IdentityModel.Tokens" />
-    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+    <PackageReference Include="Microsoft.IdentityModel.Tokens"  Version="$(JwtVersion)" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="$(JwtVersion)" />
   </ItemGroup>
 </Project>
