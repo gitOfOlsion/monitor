@@ -1,15 +1,9 @@
-# Replace monitor.yourdomain.com with your actual domain
-# Caddy auto-provisions TLS via Let's Encrypt
-
 {$DOMAIN:monitor.yourdomain.com} {
 
-    # ── Blazor Web dashboard ─────────────────────────────────────────────
-    @web {
-        not path /api/* /monitor /monitor/* /health /seq/*
-    }
+    # Blazor Server dashboard (default)
+    @web { not path /api/* /monitor /monitor/* /health /seq/* }
     handle @web {
         reverse_proxy web:5001 {
-            # WebSocket support for Blazor Server SignalR
             header_up Host              {host}
             header_up X-Real-IP         {remote_host}
             header_up X-Forwarded-For   {remote_host}
@@ -17,14 +11,14 @@
         }
     }
 
-    # ── Server API + SignalR hub ─────────────────────────────────────────
+    # Server REST API
     handle /api/* {
         reverse_proxy server:5000
     }
 
+    # SignalR hub (agents + web dashboard)
     handle /monitor* {
         reverse_proxy server:5000 {
-            # WebSocket for SignalR agents
             header_up Host              {host}
             header_up X-Real-IP         {remote_host}
             header_up X-Forwarded-For   {remote_host}
@@ -36,21 +30,14 @@
         reverse_proxy server:5000
     }
 
-    # ── Seq log viewer (admin only — protect with basic auth or IP filter) 
+    # Seq log viewer — restrict to internal IP ranges in production
     handle /seq/* {
-        # Uncomment to restrict to specific IPs:
-        # @allowed remote_ip 10.0.0.0/8 192.168.0.0/16
-        # handle @allowed { reverse_proxy seq:80 }
-        # respond "Forbidden" 403
-
         uri strip_prefix /seq
         reverse_proxy seq:80
     }
 
-    # Gzip compression
     encode gzip
 
-    # Security headers
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options    "nosniff"

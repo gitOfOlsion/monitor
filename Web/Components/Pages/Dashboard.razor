@@ -1,8 +1,8 @@
 @page "/"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @using PeripheralMonitor.Server.Data
 @using PeripheralMonitor.Shared.Models
 @using PeripheralMonitor.Web.Services
-@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @implements IAsyncDisposable
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
@@ -11,8 +11,8 @@
 
 <div class="pm-page-header">
     <h1>Dashboard</h1>
-    <span class="pm-hub-status @(Realtime.State == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected ? "connected" : "disconnected")">
-        ● @Realtime.State
+    <span class="pm-hub-badge @(IsConnected ? "pm-badge-connected" : "pm-badge-disconnected")">
+        ● @(IsConnected ? "Live" : "Reconnecting…")
     </span>
 </div>
 
@@ -24,15 +24,44 @@
     </div>
     <div class="pm-stat-card pm-stat-green">
         <div class="pm-stat-value">@_agents.Count(a => a.Status == "Approved")</div>
-        <div class="pm-stat-label">Online / Approved</div>
+        <div class="pm-stat-label">Approved</div>
     </div>
     <div class="pm-stat-card pm-stat-orange">
         <div class="pm-stat-value">@_agents.Count(a => a.Status == "Pending")</div>
         <div class="pm-stat-label">Pending Approval</div>
     </div>
+    <div class="pm-stat-card pm-stat-red">
+        <div class="pm-stat-value">@_agents.Count(a => a.Status == "Offline")</div>
+        <div class="pm-stat-label">Offline</div>
+    </div>
     <div class="pm-stat-card">
         <div class="pm-stat-value">@_events.Count</div>
-        <div class="pm-stat-label">Recent Events</div>
+        <div class="pm-stat-label">Live Events</div>
+    </div>
+</div>
+
+<!-- Agent heartbeat list -->
+<div class="pm-section">
+    <h2>Active Agents</h2>
+    <div class="pm-agent-grid">
+        @foreach (var a in _agents.Where(a => a.Status == "Approved"))
+        {
+            <div class="pm-agent-card @(IsStale(a) ? "pm-agent-stale" : "")">
+                <div class="pm-agent-name">
+                    @GetPlatformIcon(a.Platform) @a.MachineName
+                </div>
+                <div class="pm-agent-meta">@a.Institution?.Name</div>
+                <div class="pm-agent-meta">@a.IPAddress</div>
+                <div class="pm-agent-devices">@a.DeviceCount devices</div>
+                <div class="pm-agent-heartbeat">
+                    @(a.LastHeartbeat?.ToLocalTime().ToString("HH:mm:ss") ?? "—")
+                </div>
+            </div>
+        }
+        @if (!_agents.Any(a => a.Status == "Approved"))
+        {
+            <div class="pm-empty">No approved agents online yet.</div>
+        }
     </div>
 </div>
 
@@ -40,27 +69,29 @@
 <div class="pm-section">
     <h2>Live Event Feed</h2>
     <div class="pm-event-feed">
-        @foreach (var ev in _events.Take(50))
+        @foreach (var ev in _events.Take(100))
         {
             <div class="pm-event-row pm-event-@ev.EventType.ToLower()">
-                <span class="pm-event-icon">@GetEventIcon(ev.EventType)</span>
+                <span class="pm-event-time">@ev.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
                 <span class="pm-event-machine">@ev.MachineName</span>
-                <span class="pm-event-type">@ev.EventType</span>
+                <span class="pm-badge pm-badge-@ev.EventType.ToLower()">@ev.EventType</span>
                 <span class="pm-event-name">@ev.FriendlyName</span>
                 <span class="pm-event-category">@ev.Category</span>
-                <span class="pm-event-time">@ev.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
             </div>
         }
         @if (!_events.Any())
         {
-            <div class="pm-empty">Waiting for device events...</div>
+            <div class="pm-empty">Waiting for device events…</div>
         }
     </div>
 </div>
 
 @code {
-    private List<AgentEntity>       _agents = [];
+    private List<AgentEntity>          _agents = [];
     private List<DeviceChangedPayload> _events = [];
+
+    private bool IsConnected => Realtime.State ==
+        Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
 
     protected override async Task OnInitializedAsync()
     {
@@ -70,20 +101,13 @@
 
         _agents = await Api.GetAgentsAsync() ?? [];
         var dbEvents = await Api.GetEventsAsync(100) ?? [];
-        _events = dbEvents.Select(e => new DeviceChangedPayload(
-            e.MachineName, e.EventType, e.DeviceId, e.FriendlyName, e.Category, e.Status, e.Timestamp
-        )).ToList();
+        _events = dbEvents.Select(ToPayload).ToList();
     }
 
     private void HandleHeartbeat(HeartbeatPayload p)
     {
-        var agent = _agents.FirstOrDefault(a => a.MachineName == p.MachineName);
-        if (agent != null)
-        {
-            agent.LastHeartbeat = p.Timestamp;
-            agent.DeviceCount   = p.DeviceCount;
-            agent.Status        = "Approved";
-        }
+        var a = _agents.FirstOrDefault(x => x.MachineName == p.MachineName);
+        if (a != null) { a.LastHeartbeat = p.Timestamp; a.DeviceCount = p.DeviceCount; a.Status = "Approved"; }
         InvokeAsync(StateHasChanged);
     }
 
@@ -94,13 +118,16 @@
         InvokeAsync(StateHasChanged);
     }
 
-    private static string GetEventIcon(string eventType) => eventType switch
+    private static bool IsStale(AgentEntity a) =>
+        a.LastHeartbeat.HasValue && (DateTime.UtcNow - a.LastHeartbeat.Value).TotalSeconds > 30;
+
+    private static string GetPlatformIcon(string p) => p switch
     {
-        "Connected"    => "🔌",
-        "Disconnected" => "⚠️",
-        "Modified"     => "🔄",
-        _ => "📋"
+        "Windows" => "🪟", "Linux" => "🐧", _ => "❓"
     };
+
+    private static DeviceChangedPayload ToPayload(DeviceEventEntity e) =>
+        new(e.MachineName, Guid.Empty, e.EventType, e.DeviceId, e.FriendlyName, e.Category, e.Status, e.Timestamp);
 
     public async ValueTask DisposeAsync()
     {

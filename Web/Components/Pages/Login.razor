@@ -1,61 +1,45 @@
 @page "/login"
-@using System.Security.Claims
-@using Microsoft.AspNetCore.Authentication
-@inject IHttpContextAccessor HttpCtx
+@layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
 @inject NavigationManager Nav
 
 <PageTitle>Login — Peripheral Monitor</PageTitle>
 
 <div class="pm-login-page">
     <div class="pm-login-card">
-        <h1>🔐 Peripheral Monitor</h1>
+        <div class="pm-login-logo">
+            <span style="font-size:2.5rem">📡</span>
+            <h1>Peripheral Monitor</h1>
+        </div>
 
-        @if (!string.IsNullOrEmpty(_error))
+        @if (ShowError)
         {
-            <div class="pm-alert pm-alert-error">@_error</div>
+            <div class="pm-alert pm-alert-error">Invalid username or password.</div>
         }
 
-        <EditForm Model="_model" OnValidSubmit="HandleLogin" FormName="login">
-            <DataAnnotationsValidator />
+        <!-- Standard HTML form — required for cookie SignIn in Blazor Server -->
+        <form method="post" action="/auth/login">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
             <div class="pm-field">
-                <label>Username</label>
-                <InputText @bind-Value="_model.Username" class="pm-input" autocomplete="username" />
+                <label for="username">Username</label>
+                <input id="username" name="username" type="text"
+                       class="pm-input" autocomplete="username" required />
             </div>
             <div class="pm-field">
-                <label>Password</label>
-                <InputText @bind-Value="_model.Password" type="password" class="pm-input" autocomplete="current-password" />
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password"
+                       class="pm-input" autocomplete="current-password" required />
             </div>
-            <button type="submit" class="pm-btn pm-btn-primary" disabled="@_loading">
-                @(_loading ? "Signing in..." : "Sign in")
+            <button type="submit" class="pm-btn pm-btn-primary pm-btn-full">
+                Sign in
             </button>
-        </EditForm>
+        </form>
     </div>
 </div>
 
 @code {
-    [SupplyParameterFromForm]
-    private LoginModel _model { get; set; } = new();
-    private string? _error;
-    private bool _loading;
-
     [Parameter, SupplyParameterFromQuery]
     public string? ReturnUrl { get; set; }
 
-    // Note: In Blazor Server the login must be done via a traditional POST endpoint
-    // because HttpContext.SignInAsync requires a real HTTP response.
-    // This form submits to /api/auth/login endpoint.
-
-    private async Task HandleLogin()
-    {
-        _loading = true;
-        _error   = null;
-        // Navigate to server-side login handler
-        Nav.NavigateTo($"/api/auth/login?username={Uri.EscapeDataString(_model.Username)}&password={Uri.EscapeDataString(_model.Password)}&returnUrl={Uri.EscapeDataString(ReturnUrl ?? "/")}", forceLoad: true);
-    }
-
-    public class LoginModel
-    {
-        public string Username { get; set; } = "";
-        public string Password { get; set; } = "";
-    }
+    [Parameter, SupplyParameterFromQuery]
+    public bool ShowError { get; set; }
 }

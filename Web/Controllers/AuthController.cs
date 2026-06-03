@@ -1,41 +1,58 @@
-using Microsoft.AspNetCore.Identity;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
-using PeripheralMonitor.Server.Data;
 
 namespace PeripheralMonitor.Web.Controllers;
 
-[Route("api/auth")]
+[Route("auth")]
 public class AuthController : Controller
 {
-    private readonly SignInManager<User> _signIn;
+    private readonly IConfiguration          _config;
     private readonly ILogger<AuthController> _logger;
 
-    public AuthController(SignInManager<User> signIn, ILogger<AuthController> logger)
+    public AuthController(IConfiguration config, ILogger<AuthController> logger)
     {
-        _signIn = signIn;
+        _config = config;
         _logger = logger;
     }
 
-    [HttpGet("login")]
-    public async Task<IActionResult> Login(string username, string password, string returnUrl = "/")
+    // POST /auth/login  (form submit from Login.razor)
+    [HttpPost("login")]
+    public async Task<IActionResult> Login(
+        [FromForm] string  username,
+        [FromForm] string  password,
+        [FromForm] string? returnUrl)
     {
-        var result = await _signIn.PasswordSignInAsync(username, password,
-            isPersistent: true, lockoutOnFailure: false);
+        var adminUser = _config["Auth:AdminUsername"] ?? "superadmin";
+        var adminPass = _config["Auth:AdminPassword"] ?? "Admin@1234!";
 
-        if (result.Succeeded)
+        if (username != adminUser || password != adminPass)
         {
-            _logger.LogInformation("Login: {User}", username);
-            return LocalRedirect(returnUrl);
+            _logger.LogWarning("Failed login: {User} from {IP}",
+                username, HttpContext.Connection.RemoteIpAddress);
+            return Redirect("/login?showError=true");
         }
 
-        _logger.LogWarning("Failed login: {User}", username);
-        return Redirect("/login?error=invalid");
+        var claims = new List<Claim>
+        {
+            new(ClaimTypes.Name, username),
+            new(ClaimTypes.Role, "SuperAdmin"),
+        };
+
+        await HttpContext.SignInAsync("Cookies",
+            new ClaimsPrincipal(new ClaimsIdentity(claims, "Cookies")),
+            new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
+
+        _logger.LogInformation("Login: {User}", username);
+        var safe = string.IsNullOrEmpty(returnUrl) || !Url.IsLocalUrl(returnUrl) ? "/" : returnUrl;
+        return LocalRedirect(safe);
     }
 
+    // GET /auth/logout
     [HttpGet("logout")]
     public async Task<IActionResult> Logout()
     {
-        await _signIn.SignOutAsync();
+        await HttpContext.SignOutAsync("Cookies");
         return Redirect("/login");
     }
 }

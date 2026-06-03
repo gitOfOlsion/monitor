@@ -1,8 +1,8 @@
 @page "/events"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @using PeripheralMonitor.Server.Data
 @using PeripheralMonitor.Shared.Models
 @using PeripheralMonitor.Web.Services
-@attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @implements IAsyncDisposable
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
@@ -12,21 +12,22 @@
 <div class="pm-page-header">
     <h1>Device Events</h1>
     <div class="pm-filters">
-        <input class="pm-input pm-input-sm" @bind="_filterMachine" @bind:event="oninput"
-               placeholder="Filter by machine..." />
-        <select class="pm-input pm-input-sm" @bind="_filterType">
+        <input class="pm-input pm-input-sm" @bind="_fMachine" @bind:event="oninput"
+               placeholder="Machine…" />
+        <select class="pm-input pm-input-sm" @bind="_fType">
             <option value="">All types</option>
             <option value="Connected">Connected</option>
             <option value="Disconnected">Disconnected</option>
             <option value="Modified">Modified</option>
         </select>
-        <select class="pm-input pm-input-sm" @bind="_filterCategory">
+        <select class="pm-input pm-input-sm" @bind="_fCategory">
             <option value="">All categories</option>
-            @foreach (var cat in _allCategories)
+            @foreach (var c in _categories)
             {
-                <option value="@cat">@cat</option>
+                <option value="@c">@c</option>
             }
         </select>
+        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="ClearFilters">✕ Clear</button>
     </div>
 </div>
 
@@ -43,10 +44,10 @@
             </tr>
         </thead>
         <tbody>
-            @foreach (var ev in FilteredEvents)
+            @foreach (var ev in Filtered)
             {
-                <tr class="pm-event-row-@ev.EventType.ToLower()">
-                    <td>@ev.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                <tr class="pm-event-row pm-event-@ev.EventType.ToLower()">
+                    <td class="pm-mono">@ev.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
                     <td>@ev.MachineName</td>
                     <td><span class="pm-badge pm-badge-@ev.EventType.ToLower()">@ev.EventType</span></td>
                     <td title="@ev.DeviceId">@ev.FriendlyName</td>
@@ -56,48 +57,51 @@
             }
         </tbody>
     </table>
-    @if (!FilteredEvents.Any())
+
+    @if (!Filtered.Any())
     {
         <div class="pm-empty">No events match the current filter.</div>
     }
 </div>
+<div class="pm-table-footer">Showing @Filtered.Count() of @_events.Count events</div>
 
 @code {
-    private List<DeviceChangedPayload> _events = [];
-    private string _filterMachine  = "";
-    private string _filterType     = "";
-    private string _filterCategory = "";
+    private List<DeviceChangedPayload> _events     = [];
+    private IEnumerable<string>        _categories = [];
+    private string _fMachine  = "";
+    private string _fType     = "";
+    private string _fCategory = "";
 
-    private IEnumerable<string> _allCategories => _events
-        .Select(e => e.Category).Distinct().OrderBy(c => c);
-
-    private IEnumerable<DeviceChangedPayload> FilteredEvents => _events
-        .Where(e =>
-            (string.IsNullOrEmpty(_filterMachine)  || e.MachineName.Contains(_filterMachine,  StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrEmpty(_filterType)     || e.EventType == _filterType) &&
-            (string.IsNullOrEmpty(_filterCategory) || e.Category == _filterCategory));
+    private IEnumerable<DeviceChangedPayload> Filtered => _events.Where(e =>
+        (string.IsNullOrEmpty(_fMachine)  || e.MachineName.Contains(_fMachine,  StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrEmpty(_fType)     || e.EventType == _fType) &&
+        (string.IsNullOrEmpty(_fCategory) || e.Category  == _fCategory));
 
     protected override async Task OnInitializedAsync()
     {
         var db = await Api.GetEventsAsync(500) ?? [];
-        _events = db.Select(e => new DeviceChangedPayload(
-            e.MachineName, e.EventType, e.DeviceId, e.FriendlyName, e.Category, e.Status, e.Timestamp
-        )).ToList();
+        _events     = db.Select(e => new DeviceChangedPayload(
+            e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
+            e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
+        _categories = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
 
         await Realtime.EnsureConnectedAsync();
-        Realtime.OnDeviceChanged += HandleLiveEvent;
+        Realtime.OnDeviceChanged += OnLive;
     }
 
-    private void HandleLiveEvent(DeviceChangedPayload p)
+    private void OnLive(DeviceChangedPayload p)
     {
         _events.Insert(0, p);
         if (_events.Count > 500) _events.RemoveAt(500);
+        _categories = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
         InvokeAsync(StateHasChanged);
     }
 
+    private void ClearFilters() { _fMachine = ""; _fType = ""; _fCategory = ""; }
+
     public async ValueTask DisposeAsync()
     {
-        Realtime.OnDeviceChanged -= HandleLiveEvent;
+        Realtime.OnDeviceChanged -= OnLive;
         await Task.CompletedTask;
     }
 }

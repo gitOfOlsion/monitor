@@ -9,138 +9,98 @@ using PeripheralMonitor.Server.Services;
 using Serilog;
 using Serilog.Events;
 
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
-    .WriteTo.Console()
-    .CreateBootstrapLogger();
+Log.Logger = new LoggerConfiguration().MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
+    .WriteTo.Console().CreateBootstrapLogger();
 
 try
 {
     var builder = WebApplication.CreateBuilder(args);
 
-    // ── Serilog ───────────────────────────────────────────────────────────
-    builder.Host.UseSerilog((ctx, services, cfg) =>
-        cfg.ReadFrom.Configuration(ctx.Configuration)
-           .ReadFrom.Services(services)
-           .Enrich.FromLogContext()
-           .Enrich.WithMachineName()
+    builder.Host.UseSerilog((ctx, svc, cfg) =>
+        cfg.ReadFrom.Configuration(ctx.Configuration).ReadFrom.Services(svc)
+           .Enrich.FromLogContext().Enrich.WithMachineName().Enrich.WithThreadId()
            .Enrich.WithProperty("Application", "Server")
            .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
            .WriteTo.Seq(ctx.Configuration["Seq:Url"] ?? "http://seq:5341"));
 
-    // ── Database ──────────────────────────────────────────────────────────
-    builder.Services.AddDbContextFactory<AppDbContext>(opts =>
-        opts.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
+    builder.Services.AddDbContextFactory<AppDbContext>(o =>
+        o.UseNpgsql(builder.Configuration.GetConnectionString("Postgres")));
 
-    // ── Identity (table = Users) ──────────────────────────────────────────
-    builder.Services.AddIdentity<User, IdentityRole>(opts =>
+    builder.Services.AddIdentity<AppUser, IdentityRole>(o =>
     {
-        opts.Password.RequireDigit           = true;
-        opts.Password.RequiredLength         = 8;
-        opts.Password.RequireNonAlphanumeric = false;
-        opts.SignIn.RequireConfirmedAccount   = false;
+        o.Password.RequireDigit = true; o.Password.RequiredLength = 8;
+        o.Password.RequireNonAlphanumeric = false; o.SignIn.RequireConfirmedAccount = false;
     })
-    .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders();
+    .AddEntityFrameworkStores<AppDbContext>().AddDefaultTokenProviders();
 
-    // ── JWT (agents) ──────────────────────────────────────────────────────
     var jwtSecret = builder.Configuration["Jwt:Secret"]
         ?? throw new InvalidOperationException("Jwt:Secret required");
     var jwtKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret));
 
-    builder.Services.AddAuthentication(opts =>
-    {
-        opts.DefaultAuthenticateScheme = "Smart";
-        opts.DefaultChallengeScheme    = "Smart";
-    })
-    .AddPolicyScheme("Smart", "Smart Auth", opts =>
-    {
-        opts.ForwardDefaultSelector = ctx =>
+    builder.Services.AddAuthentication(o => { o.DefaultAuthenticateScheme = "Smart"; o.DefaultChallengeScheme = "Smart"; })
+        .AddPolicyScheme("Smart", "Smart", o =>
         {
-            var path = ctx.Request.Path;
-            if (path.StartsWithSegments("/monitor") || path.StartsWithSegments("/api/agent"))
-                return JwtBearerDefaults.AuthenticationScheme;
-            return IdentityConstants.ApplicationScheme;
-        };
-    })
-    .AddJwtBearer(opts =>
-    {
-        opts.TokenValidationParameters = new TokenValidationParameters
+            o.ForwardDefaultSelector = ctx =>
+                ctx.Request.Path.StartsWithSegments("/monitor") || ctx.Request.Path.StartsWithSegments("/api/agent")
+                    ? JwtBearerDefaults.AuthenticationScheme : IdentityConstants.ApplicationScheme;
+        })
+        .AddJwtBearer(o =>
         {
-            ValidateIssuer           = true,
-            ValidateAudience         = true,
-            ValidateLifetime         = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer              = "PeripheralMonitor",
-            ValidAudience            = "Agent",
-            IssuerSigningKey         = jwtKey
-        };
-        opts.Events = new JwtBearerEvents
-        {
-            OnMessageReceived = ctx =>
+            o.TokenValidationParameters = new TokenValidationParameters
             {
-                var token = ctx.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(token) &&
-                    ctx.HttpContext.Request.Path.StartsWithSegments("/monitor"))
-                    ctx.Token = token;
-                return Task.CompletedTask;
-            }
-        };
-    });
+                ValidateIssuer = true, ValidateAudience = true, ValidateLifetime = true,
+                ValidateIssuerSigningKey = true, ValidIssuer = "PeripheralMonitor", ValidAudience = "Agent",
+                IssuerSigningKey = jwtKey
+            };
+            o.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = ctx =>
+                {
+                    var t = ctx.Request.Query["access_token"];
+                    if (!string.IsNullOrEmpty(t) && ctx.HttpContext.Request.Path.StartsWithSegments("/monitor"))
+                        ctx.Token = t;
+                    return Task.CompletedTask;
+                }
+            };
+        });
 
-    builder.Services.AddAuthorization(opts =>
+    builder.Services.AddAuthorization(o => o.AddPolicy("AgentOrDashboard", p => p.RequireAuthenticatedUser()));
+    builder.Services.AddSignalR(o =>
     {
-        opts.AddPolicy("AgentOrDashboard", p => p.RequireAuthenticatedUser());
+        o.EnableDetailedErrors = builder.Environment.IsDevelopment();
+        o.MaximumReceiveMessageSize = 512 * 1024;
+        o.KeepAliveInterval = TimeSpan.FromSeconds(15);
     });
-
-    // ── SignalR ───────────────────────────────────────────────────────────
-    builder.Services.AddSignalR(opts =>
-    {
-        opts.EnableDetailedErrors      = builder.Environment.IsDevelopment();
-        opts.MaximumReceiveMessageSize = 512 * 1024;
-        opts.KeepAliveInterval         = TimeSpan.FromSeconds(15);
-        opts.ClientTimeoutInterval     = TimeSpan.FromSeconds(60);
-    });
-
-    // ── CORS ──────────────────────────────────────────────────────────────
-    builder.Services.AddCors(opts =>
-        opts.AddPolicy("DevCors", p =>
-            p.AllowAnyMethod().AllowAnyHeader()
-             .SetIsOriginAllowed(_ => true).AllowCredentials()));
-
-    // ── Services ──────────────────────────────────────────────────────────
+    builder.Services.AddCors(o => o.AddPolicy("Dev", p =>
+        p.AllowAnyMethod().AllowAnyHeader().SetIsOriginAllowed(_ => true).AllowCredentials()));
     builder.Services.AddScoped<AgentService>();
-    builder.Services.AddScoped<InstitutionService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
     builder.Services.AddHostedService<OfflineDetectorService>();
     builder.Services.AddControllers();
 
     var app = builder.Build();
 
-    // ── Startup: migrate + seed ───────────────────────────────────────────
     using (var scope = app.Services.CreateScope())
     {
         var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+        var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
         await db.Database.MigrateAsync();
 
-        var roleMgr  = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-        var userMgr  = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
-
         foreach (var role in new[] { "SuperAdmin", "InstitutionAdmin", "Viewer" })
-            if (!await roleMgr.RoleExistsAsync(role))
-                await roleMgr.CreateAsync(new IdentityRole(role));
+            if (!await roleMgr.RoleExistsAsync(role)) await roleMgr.CreateAsync(new IdentityRole(role));
 
-        var adminPass = app.Configuration["AdminPassword"] ?? "Admin@1234!";
-        if (await userMgr.FindByNameAsync("admin") == null)
+        var adminPass = app.Configuration["SuperAdminPassword"] ?? "Admin@1234!";
+        if (await userMgr.FindByNameAsync("superadmin") == null)
         {
-            var admin = new User { UserName = "admin", Email = "admin@local", CreatedAt = DateTime.UtcNow };
-            await userMgr.CreateAsync(admin, adminPass);
-            await userMgr.AddToRoleAsync(admin, "SuperAdmin");
+            var admin = new AppUser { UserName = "superadmin", Email = "admin@local", Role = "SuperAdmin" };
+            if ((await userMgr.CreateAsync(admin, adminPass)).Succeeded)
+                await userMgr.AddToRoleAsync(admin, "SuperAdmin");
         }
     }
 
     app.UseSerilogRequestLogging();
-    if (app.Environment.IsDevelopment()) app.UseCors("DevCors");
+    if (app.Environment.IsDevelopment()) app.UseCors("Dev");
     app.UseAuthentication();
     app.UseAuthorization();
     app.MapControllers();
