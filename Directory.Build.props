@@ -29,10 +29,10 @@
     <ExtensionsVersion>$(DotNetVersion).0</ExtensionsVersion>
 
     <!-- Npgsql — own cadence, does NOT always match .NET version -->
-    <NpgsqlEfVersion>9.0.4</NpgsqlEfVersion>
+    <NpgsqlEfVersion>10.0.0</NpgsqlEfVersion>
 
     <!-- JWT — own cadence -->
-    <JwtVersion>8.3.2</JwtVersion>
+    <JwtVersion>8.4.0</JwtVersion>
 
     <!-- Serilog — own cadence per package -->
     <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
