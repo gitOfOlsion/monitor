@@ -1,0 +1,72 @@
+<Project>
+
+  <!-- ── .NET version — change this ONE number to upgrade the entire solution ── -->
+  <PropertyGroup>
+    <DotNetVersion>10.0</DotNetVersion>
+  </PropertyGroup>
+
+  <!-- ── Shared project properties ─────────────────────────────────────────── -->
+  <PropertyGroup>
+    <TargetFramework>net$(DotNetVersion)</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <Optimize Condition="'$(Configuration)' == 'Release'">true</Optimize>
+  </PropertyGroup>
+
+  <!-- ── Package version groups ─────────────────────────────────────────────
+       Microsoft.* packages that track the .NET major version exactly.
+       Everything else has its own release cadence and is pinned independently.
+  ──────────────────────────────────────────────────────────────────────────── -->
+  <PropertyGroup>
+    <!-- Tracks DotNetVersion -->
+    <MicrosoftAspNetCoreVersion>$(DotNetVersion).0</MicrosoftAspNetCoreVersion>
+    <MicrosoftExtensionsVersion>$(DotNetVersion).0</MicrosoftExtensionsVersion>
+    <EfCoreVersion>$(DotNetVersion).0</EfCoreVersion>
+
+    <!-- Npgsql major tracks EF Core major but has its own patch cadence -->
+    <NpgsqlEfVersion>$(DotNetVersion).0</NpgsqlEfVersion>
+
+    <!-- JWT — own versioning, update independently -->
+    <JwtVersion>8.3.2</JwtVersion>
+
+    <!-- Serilog — own versioning, update independently -->
+    <SerilogAspNetCoreVersion>9.0.0</SerilogAspNetCoreVersion>
+    <SerilogHostingVersion>8.0.0</SerilogHostingVersion>
+    <SerilogConsoleSinkVersion>6.0.0</SerilogConsoleSinkVersion>
+    <SerilogFileSinkVersion>6.0.0</SerilogFileSinkVersion>
+    <SerilogSeqSinkVersion>8.0.0</SerilogSeqSinkVersion>
+    <SerilogConfigVersion>8.0.4</SerilogConfigVersion>
+    <SerilogEnvVersion>3.0.0</SerilogEnvVersion>
+    <SerilogThreadVersion>4.0.0</SerilogThreadVersion>
+  </PropertyGroup>
+
+  <!-- ── Centralised package versions (no Version attr needed in csproj) ─────── -->
+  <ItemGroup>
+    <!-- ASP.NET Core / SignalR -->
+    <PackageReference Update="Microsoft.AspNetCore.SignalR.Client"               Version="$(MicrosoftAspNetCoreVersion)" />
+    <PackageReference Update="Microsoft.AspNetCore.Authentication.JwtBearer"     Version="$(MicrosoftAspNetCoreVersion)" />
+    <PackageReference Update="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="$(MicrosoftAspNetCoreVersion)" />
+    <!-- EF Core -->
+    <PackageReference Update="Microsoft.EntityFrameworkCore.Design"              Version="$(EfCoreVersion)" />
+    <!-- Extensions -->
+    <PackageReference Update="Microsoft.Extensions.Hosting"                      Version="$(MicrosoftExtensionsVersion)" />
+    <PackageReference Update="Microsoft.Extensions.Hosting.WindowsServices"      Version="$(MicrosoftExtensionsVersion)" />
+    <!-- Npgsql -->
+    <PackageReference Update="Npgsql.EntityFrameworkCore.PostgreSQL"             Version="$(NpgsqlEfVersion)" />
+    <!-- JWT -->
+    <PackageReference Update="Microsoft.IdentityModel.Tokens"                    Version="$(JwtVersion)" />
+    <PackageReference Update="System.IdentityModel.Tokens.Jwt"                   Version="$(JwtVersion)" />
+    <!-- Serilog -->
+    <PackageReference Update="Serilog.AspNetCore"                                Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Update="Serilog.Extensions.Hosting"                        Version="$(SerilogHostingVersion)" />
+    <PackageReference Update="Serilog.Sinks.Console"                             Version="$(SerilogConsoleSinkVersion)" />
+    <PackageReference Update="Serilog.Sinks.File"                                Version="$(SerilogFileSinkVersion)" />
+    <PackageReference Update="Serilog.Sinks.Seq"                                 Version="$(SerilogSeqSinkVersion)" />
+    <PackageReference Update="Serilog.Settings.Configuration"                    Version="$(SerilogConfigVersion)" />
+    <PackageReference Update="Serilog.Enrichers.Environment"                     Version="$(SerilogEnvVersion)" />
+    <PackageReference Update="Serilog.Enrichers.Thread"                          Version="$(SerilogThreadVersion)" />
+  </ItemGroup>
+
+</Project>

@@ -1,203 +1,146 @@
 using System.Collections.Concurrent;
 using System.Runtime.Versioning;
+using PeripheralMonitor.Shared.Models;
 
 namespace PeripheralMonitor.Agent;
 
 [SupportedOSPlatform("linux")]
 public sealed class LinuxDeviceMonitor : IDeviceMonitor
 {
-    private readonly ILogger<LinuxDeviceMonitor>             _logger;
-    private readonly CancellationTokenSource                 _cts = new();
-    private readonly ConcurrentDictionary<string, DeviceInfo> _snapshot = new();
-    private readonly ConcurrentDictionary<string, DateTime>  _recentEvents = new();
-    private FileSystemWatcher?                               _devWatcher;
-    private const int DedupWindowSeconds = 2;
+    private readonly ILogger<LinuxDeviceMonitor> _log;
+    private readonly CancellationTokenSource _cts = new();
+    private readonly ConcurrentDictionary<string, DeviceInfo> _snap = new();
+    private readonly ConcurrentDictionary<string, DateTime> _dedup = new();
+    private FileSystemWatcher? _watcher;
 
     public event Func<string, DeviceInfo, Task>? DeviceChanged;
-
-    public LinuxDeviceMonitor(ILogger<LinuxDeviceMonitor> logger) => _logger = logger;
+    public LinuxDeviceMonitor(ILogger<LinuxDeviceMonitor> log) => _log = log;
 
     public async Task StartAsync(CancellationToken ct = default)
     {
-        await LoadInitialSnapshotAsync();
-        _logger.LogInformation("Linux monitor: {Count} devices in initial snapshot", _snapshot.Count);
-        StartDevWatcher();
-        StartSysBusPoller();
-        StartUdevPipeReader();
+        foreach (var kv in SysBus()) _snap[kv.Key] = kv.Value;
+        _log.LogInformation("Linux monitor: {N} devices", _snap.Count);
+        StartDevWatcher(); StartPoller(); StartUdevPipe();
     }
 
     public Task<IReadOnlyList<DeviceInfo>> GetSnapshotAsync()
-        => Task.FromResult<IReadOnlyList<DeviceInfo>>(_snapshot.Values.ToList());
+        => Task.FromResult<IReadOnlyList<DeviceInfo>>(_snap.Values.ToList());
 
     private void StartDevWatcher()
     {
         try
         {
-            _devWatcher = new FileSystemWatcher("/dev")
-            {
-                NotifyFilter          = NotifyFilters.FileName | NotifyFilters.DirectoryName,
-                IncludeSubdirectories = true,
-                EnableRaisingEvents   = true
-            };
-            _devWatcher.Created += (_, e) => _ = OnDevNode("Connected",    e.FullPath);
-            _devWatcher.Deleted += (_, e) => _ = OnDevNode("Disconnected", e.FullPath);
-            _logger.LogInformation("/dev watcher active");
+            _watcher = new FileSystemWatcher("/dev") { NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName, IncludeSubdirectories = true, EnableRaisingEvents = true };
+            _watcher.Created += (_, e) => _ = OnDev("Connected",    e.FullPath);
+            _watcher.Deleted += (_, e) => _ = OnDev("Disconnected", e.FullPath);
         }
-        catch (Exception ex) { _logger.LogWarning(ex, "/dev watcher failed"); }
+        catch (Exception ex) { _log.LogWarning(ex, "/dev watcher failed"); }
     }
 
-    private async Task OnDevNode(string action, string path)
+    private async Task OnDev(string action, string path)
     {
-        var device = MapDevPath(path);
-        if (device == null) return;
-        if (action == "Connected") _snapshot[device.DeviceId] = device;
-        else _snapshot.TryRemove(device.DeviceId, out _);
-        await FireAsync(action, device);
+        var dev = ClassifyDev(path); if (dev == null) return;
+        if (action == "Connected") _snap[dev.DeviceId] = dev; else _snap.TryRemove(dev.DeviceId, out _);
+        await FireAsync(action, dev);
     }
 
-    private void StartSysBusPoller()
+    private void StartPoller() => _ = Task.Run(async () =>
     {
-        _ = Task.Run(async () =>
+        while (!_cts.Token.IsCancellationRequested)
         {
-            while (!_cts.Token.IsCancellationRequested)
-            {
-                try { await Task.Delay(TimeSpan.FromSeconds(15), _cts.Token); await ReconcileAsync(); }
-                catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _logger.LogWarning(ex, "Sys/bus poll error"); }
-            }
-        });
-    }
+            try { await Task.Delay(15_000, _cts.Token); await ReconcileAsync(); }
+            catch (OperationCanceledException) { break; }
+            catch (Exception ex) { _log.LogWarning(ex, "Poller error"); }
+        }
+    });
 
     private async Task ReconcileAsync()
     {
-        var current = await EnumerateSysBusAsync();
-        var arrived = current.Keys.Except(_snapshot.Keys).ToList();
-        var removed = _snapshot.Keys.Except(current.Keys).ToList();
-        foreach (var id in arrived) { _snapshot[id] = current[id]; await FireAsync("Connected",    current[id]); }
-        foreach (var id in removed) { var d = _snapshot[id]; _snapshot.TryRemove(id, out _); await FireAsync("Disconnected", d); }
+        var cur = SysBus();
+        foreach (var id in cur.Keys.Except(_snap.Keys)) { _snap[id] = cur[id]; await FireAsync("Connected",    cur[id]); }
+        foreach (var id in _snap.Keys.Except(cur.Keys)) { var d = _snap[id]; _snap.TryRemove(id, out _); await FireAsync("Disconnected", d); }
     }
 
-    private Task<Dictionary<string, DeviceInfo>> EnumerateSysBusAsync() => Task.Run(() =>
+    private Dictionary<string, DeviceInfo> SysBus()
     {
-        var result = new Dictionary<string, DeviceInfo>(StringComparer.Ordinal);
-        EnumerateSysPath("/sys/bus/usb/devices",       "USB Device", result);
-        EnumerateSysPath("/sys/bus/hid/devices",       "HID Device", result);
-        EnumerateSysPath("/sys/bus/input/devices",     "Input Device", result);
-        EnumerateSysPath("/sys/bus/bluetooth/devices", "Bluetooth", result);
-        EnumerateSysPath("/sys/bus/pci/devices",       "PCI Device", result);
-        return result;
-    });
-
-    private void EnumerateSysPath(string path, string defaultCategory, Dictionary<string, DeviceInfo> result)
-    {
-        if (!Directory.Exists(path)) return;
-        try
+        var r = new Dictionary<string, DeviceInfo>();
+        foreach (var (path, cat) in new[] { ("/sys/bus/usb/devices","USB Device"), ("/sys/bus/hid/devices","HID Device"), ("/sys/bus/input/devices","Input Device"), ("/sys/bus/bluetooth/devices","Bluetooth") })
         {
-            foreach (var dir in Directory.GetDirectories(path))
+            if (!Directory.Exists(path)) continue;
+            try { foreach (var dir in Directory.GetDirectories(path))
             {
-                var id       = Path.GetFileName(dir);
-                var name     = ReadAttr(dir, "product") ?? ReadAttr(dir, "description") ?? ReadAttr(dir, "name") ?? id;
-                var category = DetectCategory(dir, id, defaultCategory);
-                result[id]   = new DeviceInfo(id, name, category, "OK");
-            }
+                var id = Path.GetFileName(dir);
+                r[id]  = new DeviceInfo(id, Attr(dir,"product") ?? Attr(dir,"name") ?? id, DetectCat(dir, id, cat), "OK");
+            } } catch { }
         }
-        catch { }
+        return r;
     }
 
-    private static string? ReadAttr(string dir, string attr)
+    private void StartUdevPipe()
     {
-        try { var p = Path.Combine(dir, attr); return File.Exists(p) ? File.ReadAllText(p).Trim() : null; }
-        catch { return null; }
-    }
-
-    private static string DetectCategory(string dir, string id, string fallback)
-    {
-        var lower = (id + (ReadAttr(dir, "modalias") ?? "") + (ReadAttr(dir, "class") ?? "")).ToLowerInvariant();
-        if (lower.Contains("keyboard"))  return "Keyboard";
-        if (lower.Contains("mouse"))     return "Mouse";
-        if (lower.Contains("bluetooth")) return "Bluetooth";
-        if (lower.Contains("audio") || lower.Contains("sound")) return "Audio";
-        if (lower.Contains("camera") || lower.Contains("video")) return "Camera";
-        if (lower.Contains("printer"))   return "Printer";
-        if (lower.Contains("storage") || lower.Contains("disk")) return "Storage";
-        if (lower.Contains("net") || lower.Contains("ethernet")) return "Network";
-        if (lower.Contains("serial") || lower.Contains("uart"))  return "Serial Port";
-        return fallback;
-    }
-
-    private void StartUdevPipeReader()
-    {
-        const string pipePath = "/run/peripheral-monitor/udev-events";
-        if (!File.Exists(pipePath)) return;
+        const string p = "/run/peripheral-monitor/udev-events";
+        if (!File.Exists(p)) return;
         _ = Task.Run(async () =>
         {
             try
             {
-                using var reader = new StreamReader(pipePath);
+                using var r = new StreamReader(p);
                 while (!_cts.Token.IsCancellationRequested)
                 {
-                    var line = await reader.ReadLineAsync(_cts.Token);
+                    var line = await r.ReadLineAsync(_cts.Token);
                     if (string.IsNullOrWhiteSpace(line)) continue;
-                    var parts = line.Split('|');
-                    if (parts.Length < 4) continue;
-                    var action   = parts[0] == "add" ? "Connected" : "Disconnected";
-                    var category = MapSubsystem(parts[2]);
-                    var name     = Uri.UnescapeDataString(parts[3].Replace("+", " "));
-                    var device   = new DeviceInfo(parts[1], name, category, "OK");
-                    await FireAsync(action, device);
+                    var parts = line.Split('|'); if (parts.Length < 4) continue;
+                    var action = parts[0] == "add" ? "Connected" : "Disconnected";
+                    await FireAsync(action, new DeviceInfo(parts[1], Uri.UnescapeDataString(parts[3].Replace("+", " ")), MapSub(parts[2]), "OK"));
                 }
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            { _logger.LogDebug("udev pipe ended: {Msg}", ex.Message); }
+            catch { }
         });
     }
 
-    private static DeviceInfo? MapDevPath(string path)
+    private static DeviceInfo? ClassifyDev(string path)
     {
-        var name = Path.GetFileName(path);
-        if (name.StartsWith(".")) return null;
-        var category = name switch
+        var n = Path.GetFileName(path); if (n.StartsWith('.')) return null;
+        var cat = n switch
         {
-            _ when name.StartsWith("sd") || name.StartsWith("nvme") => "Storage",
-            _ when name.StartsWith("tty")   => "Serial Port",
-            _ when name.StartsWith("video") => "Camera",
-            _ when name.StartsWith("input") => "Input Device",
-            _ when name.StartsWith("hidraw")=> "HID Device",
+            _ when n.StartsWith("sd") || n.StartsWith("nvme") => "Storage",
+            _ when n.StartsWith("tty")    => "Serial/COM Port",
+            _ when n.StartsWith("video")  => "Camera",
+            _ when n.StartsWith("hidraw") => "HID Device",
+            _ when n.StartsWith("input")  => "Input Device",
             _ => null
         };
-        return category == null ? null : new DeviceInfo(path, name, category, "OK");
+        return cat == null ? null : new DeviceInfo(path, n, cat, "OK");
     }
 
-    private static string MapSubsystem(string s) => s.ToLowerInvariant() switch
+    private static string? Attr(string dir, string a) { try { var p = Path.Combine(dir, a); return File.Exists(p) ? File.ReadAllText(p).Trim() : null; } catch { return null; } }
+
+    private static string DetectCat(string dir, string id, string fb)
     {
-        "usb"        => "USB Device",
-        "hid"        => "HID Device",
-        "input"      => "Input Device",
-        "bluetooth"  => "Bluetooth",
-        "block"      => "Storage",
-        "tty"        => "Serial Port",
-        "video4linux"=> "Camera",
-        "sound"      => "Audio",
-        "net"        => "Network",
-        _            => "Other"
+        var s = (id + (Attr(dir,"modalias") ?? "") + (Attr(dir,"class") ?? "")).ToLowerInvariant();
+        if (s.Contains("keyboard")) return "Keyboard"; if (s.Contains("mouse")) return "Mouse";
+        if (s.Contains("bluetooth")) return "Bluetooth"; if (s.Contains("audio") || s.Contains("sound")) return "Audio";
+        if (s.Contains("camera") || s.Contains("video")) return "Camera"; if (s.Contains("printer")) return "Printer";
+        if (s.Contains("storage") || s.Contains("disk")) return "Storage"; if (s.Contains("net")) return "Network";
+        if (s.Contains("serial") || s.Contains("uart")) return "Serial/COM Port";
+        return fb;
+    }
+
+    private static string MapSub(string s) => s.ToLowerInvariant() switch
+    {
+        "usb" => "USB Device", "hid" => "HID Device", "input" => "Input Device",
+        "bluetooth" => "Bluetooth", "block" => "Storage", "tty" => "Serial/COM Port",
+        "video4linux" => "Camera", "sound" => "Audio", "net" => "Network", _ => s
     };
 
-    private async Task LoadInitialSnapshotAsync()
+    private async Task FireAsync(string action, DeviceInfo dev)
     {
-        var devices = await EnumerateSysBusAsync();
-        foreach (var kv in devices) _snapshot[kv.Key] = kv.Value;
+        var key = $"{action}:{dev.DeviceId}"; var now = DateTime.UtcNow;
+        if (_dedup.TryGetValue(key, out var last) && (now - last).TotalSeconds < 2) return;
+        _dedup[key] = now;
+        try { if (DeviceChanged != null) await DeviceChanged(action, dev); } catch (Exception ex) { _log.LogWarning(ex, "DeviceChanged error"); }
     }
 
-    private async Task FireAsync(string action, DeviceInfo device)
-    {
-        var key = $"{action}:{device.DeviceId}";
-        var now = DateTime.UtcNow;
-        if (_recentEvents.TryGetValue(key, out var last) && (now - last).TotalSeconds < DedupWindowSeconds) return;
-        _recentEvents[key] = now;
-        try { if (DeviceChanged != null) await DeviceChanged(action, device); }
-        catch (Exception ex) { _logger.LogWarning(ex, "DeviceChanged error"); }
-    }
-
-    public void Stop()  => _cts.Cancel();
-    public void Dispose() { Stop(); _devWatcher?.Dispose(); _cts.Dispose(); }
+    public void Stop() => _cts.Cancel();
+    public void Dispose() { Stop(); _watcher?.Dispose(); _cts.Dispose(); }
 }

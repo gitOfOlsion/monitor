@@ -1,0 +1,76 @@
+<Project>
+
+  <!--
+    Directory.Build.targets
+    ═══════════════════════
+    Runs AFTER each project's own build logic.
+    Responsibilities:
+      1. Validate DotNetVersion consistency at build time
+      2. Validate Docker ARG matches props (informational warning)
+      3. Enforce nullable and warnings-as-errors in Release
+      4. Block accidental debug artifacts in Release builds
+  -->
+
+  <!-- ── 1. Validate TargetFramework matches DotNetVersion ─────────────────
+       Catches the case where someone edits a .csproj TargetFramework
+       directly instead of going through Directory.Build.props.
+  ────────────────────────────────────────────────────────────────────────── -->
+  <Target Name="ValidateDotNetVersionConsistency" BeforeTargets="Build">
+    <PropertyGroup>
+      <_ExpectedTfm>net$(DotNetVersion)</_ExpectedTfm>
+    </PropertyGroup>
+    <Error
+      Condition="'$(TargetFramework)' != '$(_ExpectedTfm)'"
+      Text="[VersionGuard] $(MSBuildProjectName): TargetFramework is '$(TargetFramework)' but Directory.Build.props sets DotNetVersion=$(DotNetVersion) (expected '$(TargetFramework)' = '$(_ExpectedTfm)'). Edit DotNetVersion in Directory.Build.props — do not override TargetFramework in individual .csproj files." />
+    <Message
+      Condition="'$(TargetFramework)' == '$(_ExpectedTfm)'"
+      Text="[VersionGuard] $(MSBuildProjectName): TargetFramework=$(TargetFramework) ✓"
+      Importance="low" />
+  </Target>
+
+  <!-- ── 2. Validate that package versions referencing DotNetVersion
+       actually resolve to a non-empty string (catches typos in props).
+  ────────────────────────────────────────────────────────────────────────── -->
+  <Target Name="ValidateVersionProperties" BeforeTargets="Build">
+    <Error
+      Condition="'$(MicrosoftAspNetCoreVersion)' == ''"
+      Text="[VersionGuard] MicrosoftAspNetCoreVersion is empty. Check Directory.Build.props." />
+    <Error
+      Condition="'$(EfCoreVersion)' == ''"
+      Text="[VersionGuard] EfCoreVersion is empty. Check Directory.Build.props." />
+    <Error
+      Condition="'$(JwtVersion)' == ''"
+      Text="[VersionGuard] JwtVersion is empty. Check Directory.Build.props." />
+  </Target>
+
+  <!-- ── 3. Enforce stricter analysis in Release ───────────────────────────
+       In Debug we're lenient; in Release we treat nullable violations
+       and certain analyzer warnings as errors.
+  ────────────────────────────────────────────────────────────────────────── -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <Nullable>enable</Nullable>
+    <WarningsAsErrors>nullable</WarningsAsErrors>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <!-- ── 4. Print a one-line build summary per project ─────────────────────
+       Visible with: dotnet build -v:m
+  ────────────────────────────────────────────────────────────────────────── -->
+  <Target Name="PrintBuildSummary" AfterTargets="Build">
+    <Message
+      Text="[PeripheralMonitor] Built $(MSBuildProjectName) → $(TargetFramework) | $(Configuration)"
+      Importance="high" />
+  </Target>
+
+  <!-- ── 5. Docker ARG reminder ────────────────────────────────────────────
+       Not enforced (no Docker SDK access at MSBuild time), but reminds
+       developers to keep Dockerfiles in sync when DotNetVersion changes.
+  ────────────────────────────────────────────────────────────────────────── -->
+  <Target Name="DockerVersionReminder" AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release'">
+    <Message
+      Text="[VersionGuard] Reminder: Dockerfiles use ARG DOTNET_VERSION=$(DotNetVersion) — ensure docker-compose.yml build.args matches."
+      Importance="high" />
+  </Target>
+
+</Project>

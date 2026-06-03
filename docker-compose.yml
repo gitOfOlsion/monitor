@@ -1,10 +1,12 @@
 version: "3.9"
 
+# ── Single version variable — matches Directory.Build.props DotNetVersion ──
+x-dotnet-version: &dotnet-version "10.0"
+
 services:
 
-  # ── PostgreSQL ──────────────────────────────────────────────────────────
   db:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
     container_name: pm_db
     restart: unless-stopped
     environment:
@@ -18,10 +20,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - internal
+    networks: [internal]
 
-  # ── Seq (structured log viewer) ─────────────────────────────────────────
   seq:
     image: datalust/seq:latest
     container_name: pm_seq
@@ -30,18 +30,15 @@ services:
       ACCEPT_EULA: "Y"
     volumes:
       - seq_data:/data
-    networks:
-      - internal
-    # Seq UI exposed ONLY internally — Caddy will proxy it
-    expose:
-      - "80"
-      - "5341"
+    expose: ["80", "5341"]
+    networks: [internal]
 
-  # ── Server (API + SignalR hub) ──────────────────────────────────────────
   server:
     build:
       context: .
       dockerfile: Server/Dockerfile
+      args:
+        DOTNET_VERSION: *dotnet-version
     container_name: pm_server
     restart: unless-stopped
     depends_on:
@@ -50,49 +47,38 @@ services:
       seq:
         condition: service_started
     environment:
-      ASPNETCORE_ENVIRONMENT:              Production
-      ConnectionStrings__Postgres:        "Host=db;Port=5432;Database=peripheral_monitor;Username=pm_user;Password=${DB_PASSWORD}"
-      Jwt__Secret:                         ${JWT_SECRET}
-      AdminPassword:                       ${ADMIN_PASSWORD}
-      Seq__Url:                            http://seq:5341
-    networks:
-      - internal
-    expose:
-      - "5000"
-    # UDP discovery port — must be accessible from LAN agents
+      ASPNETCORE_ENVIRONMENT:           Production
+      ConnectionStrings__Postgres:      "Host=db;Port=5432;Database=peripheral_monitor;Username=pm_user;Password=${DB_PASSWORD}"
+      Jwt__Secret:                      ${JWT_SECRET}
+      SuperAdminPassword:               ${SUPER_ADMIN_PASSWORD}
+      Seq__Url:                         http://seq:5341
+    networks: [internal]
+    expose: ["5000"]
     ports:
-      - "5001:5001/udp"
+      - "5001:5001/udp"   # UDP multicast discovery from LAN agents
 
-  # ── Web (Blazor Server dashboard) ───────────────────────────────────────
   web:
     build:
       context: .
       dockerfile: Web/Dockerfile
+      args:
+        DOTNET_VERSION: *dotnet-version
     container_name: pm_web
     restart: unless-stopped
-    depends_on:
-      - server
-      - seq
+    depends_on: [server, seq]
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ServerApiUrl:           http://server:5000
-      Auth__AdminUsername:    admin
-      Auth__AdminPassword:    ${ADMIN_PASSWORD}
+      Auth__AdminPassword:    ${SUPER_ADMIN_PASSWORD}
       Seq__Url:               http://seq:5341
-    networks:
-      - internal
-    expose:
-      - "5001"
+    networks: [internal]
+    expose: ["5001"]
 
-  # ── Caddy (reverse proxy + HTTPS) ────────────────────────────────────────
   caddy:
     image: caddy:2-alpine
     container_name: pm_caddy
     restart: unless-stopped
-    depends_on:
-      - web
-      - server
-      - seq
+    depends_on: [web, server, seq]
     ports:
       - "80:80"
       - "443:443"
@@ -100,8 +86,7 @@ services:
       - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
-    networks:
-      - internal
+    networks: [internal]
 
 volumes:
   pg_data:
