@@ -10,7 +10,7 @@ RUN dotnet restore Web/PeripheralMonitor.Web.csproj
 COPY Shared/ Shared/
 COPY Web/    Web/
 RUN dotnet publish Web/PeripheralMonitor.Web.csproj \
-    -c Release -o /app/publish --no-restore
+    -c Release -o /app/publish
 
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION} AS runtime
 WORKDIR /app
