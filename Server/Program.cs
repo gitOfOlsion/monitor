@@ -85,7 +85,7 @@ try
         var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-        await db.Database.MigrateAsync();
+        await db.Database.EnsureCreatedAsync();
 
         foreach (var role in new[] { "SuperAdmin", "InstitutionAdmin", "Viewer" })
             if (!await roleMgr.RoleExistsAsync(role)) await roleMgr.CreateAsync(new IdentityRole(role));
