@@ -28,7 +28,7 @@
     <EfCoreVersion>$(DotNetVersion).0</EfCoreVersion>
     <ExtensionsVersion>$(DotNetVersion).0</ExtensionsVersion>
 
-    <!-- Npgsql — own cadence, does NOT always match .NET version -->
+    <!-- Npgsql — major must match EF Core major (9→9.x, 10→10.x) -->
     <NpgsqlEfVersion>10.0.0</NpgsqlEfVersion>
 
     <!-- JWT — own cadence -->
