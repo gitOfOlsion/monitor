@@ -1,0 +1,22 @@
+:80 {
+    @web {
+        not path /api/* /monitor /monitor/* /health /seq/*
+    }
+    handle @web {
+        reverse_proxy web:5001
+    }
+    handle /api/* {
+        reverse_proxy server:5000
+    }
+    handle /monitor* {
+        reverse_proxy server:5000
+    }
+    handle /health {
+        reverse_proxy server:5000
+    }
+    handle /seq/* {
+        uri strip_prefix /seq
+        reverse_proxy seq:80
+    }
+    encode gzip
+}
