@@ -1,0 +1,86 @@
+@page "/institutions"
+@attribute [Authorize(Roles = "SuperAdmin")]
+@inject ServerApiClient Api
+
+<PageTitle>Institutions — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Institutions</h1>
+    <button class="pm-btn pm-btn-primary" @onclick="() => _showCreate = true">+ New Institution</button>
+</div>
+
+@if (_showCreate)
+{
+    <div class="pm-modal-overlay" @onclick="() => _showCreate = false">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>New Institution</h2>
+            <div class="pm-field"><label>Name</label><input class="pm-input" @bind="_newName" /></div>
+            <div class="pm-field"><label>Type</label>
+                <select class="pm-input" @bind="_newType">
+                    <option value="University">University</option><option value="School">School</option>
+                    <option value="Company">Company</option><option value="Other">Other</option>
+                </select>
+            </div>
+            <div class="pm-field"><label>Contact Email</label><input class="pm-input" @bind="_newEmail" type="email" /></div>
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="() => _showCreate = false">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_newName))">Create</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_token != null)
+{
+    <div class="pm-modal-overlay" @onclick="() => _token = null">
+        <div class="pm-modal pm-modal-wide" @onclick:stopPropagation>
+            <h2>Agent Provision Token</h2>
+            <p class="pm-modal-hint">Place in <code>appsettings.local.json</code> on the target machine.</p>
+            <div class="pm-field"><textarea class="pm-input pm-mono pm-textarea" readonly>@GetJson()</textarea></div>
+            <div class="pm-modal-actions"><button class="pm-btn pm-btn-secondary" @onclick="() => _token = null">Close</button></div>
+        </div>
+    </div>
+}
+
+@if (_loading) { <div class="pm-loading">Loading…</div> }
+else
+{
+    <div class="pm-table-wrapper">
+        <table class="pm-table">
+            <thead><tr><th>Name</th><th>Slug</th><th>Type</th><th>Contact</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody>
+                @foreach (var i in _institutions)
+                {
+                    <tr>
+                        <td><strong>@i.Name</strong></td>
+                        <td><code>@i.Slug</code></td>
+                        <td>@i.Type</td>
+                        <td>@i.ContactEmail</td>
+                        <td>@i.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                        <td><button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => GetTokenAsync(i)">🔑 Provision</button></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!_institutions.Any()) { <div class="pm-empty">No institutions yet.</div> }
+    </div>
+}
+
+@code {
+    private List<InstitutionDto> _institutions = [];
+    private bool _loading = true, _showCreate;
+    private string _newName = "", _newType = "University", _newEmail = "";
+    private string? _token; private string _tokenInst = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+    private async Task LoadAsync() { _loading = true; _institutions = await Api.GetInstitutionsAsync() ?? []; _loading = false; }
+
+    private async Task CreateAsync()
+    {
+        var r = await Api.CreateInstitutionAsync(_newName, _newType, _newEmail);
+        if (r != null) { _showCreate = false; _newName = _newEmail = ""; await LoadAsync(); }
+    }
+
+    private async Task GetTokenAsync(InstitutionDto inst) { _token = await Api.GetProvisionTokenAsync(inst.Id); _tokenInst = inst.Name; }
+    private string GetJson() => $$"""{ "SignalRUrl": "https://your-domain.com/monitor", "JwtToken": "{{_token}}" }""";
+}

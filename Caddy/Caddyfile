@@ -1,0 +1,47 @@
+{$DOMAIN:monitor.yourdomain.com} {
+
+    # Blazor Server dashboard (default)
+    @web { not path /api/* /monitor /monitor/* /health /seq/* }
+    handle @web {
+        reverse_proxy web:5001 {
+            header_up Host              {host}
+            header_up X-Real-IP         {remote_host}
+            header_up X-Forwarded-For   {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Server REST API
+    handle /api/* {
+        reverse_proxy server:5000
+    }
+
+    # SignalR hub (agents + web dashboard)
+    handle /monitor* {
+        reverse_proxy server:5000 {
+            header_up Host              {host}
+            header_up X-Real-IP         {remote_host}
+            header_up X-Forwarded-For   {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    handle /health {
+        reverse_proxy server:5000
+    }
+
+    # Seq log viewer — restrict to internal IP ranges in production
+    handle /seq/* {
+        uri strip_prefix /seq
+        reverse_proxy seq:80
+    }
+
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        X-Frame-Options           "SAMEORIGIN"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+    }
+}

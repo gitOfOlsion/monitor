@@ -1,0 +1,45 @@
+@page "/login"
+@layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
+@inject NavigationManager Nav
+
+<PageTitle>Login — Peripheral Monitor</PageTitle>
+
+<div class="pm-login-page">
+    <div class="pm-login-card">
+        <div class="pm-login-logo">
+            <span style="font-size:2.5rem">📡</span>
+            <h1>Peripheral Monitor</h1>
+        </div>
+
+        @if (ShowError)
+        {
+            <div class="pm-alert pm-alert-error">Invalid username or password.</div>
+        }
+
+        <!-- Standard HTML form — required for cookie SignIn in Blazor Server -->
+        <form method="post" action="/auth/login">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <div class="pm-field">
+                <label for="username">Username</label>
+                <input id="username" name="username" type="text"
+                       class="pm-input" autocomplete="username" required />
+            </div>
+            <div class="pm-field">
+                <label for="password">Password</label>
+                <input id="password" name="password" type="password"
+                       class="pm-input" autocomplete="current-password" required />
+            </div>
+            <button type="submit" class="pm-btn pm-btn-primary pm-btn-full">
+                Sign in
+            </button>
+        </form>
+    </div>
+</div>
+
+@code {
+    [Parameter, SupplyParameterFromQuery]
+    public string? ReturnUrl { get; set; }
+
+    [Parameter, SupplyParameterFromQuery]
+    public bool ShowError { get; set; }
+}
