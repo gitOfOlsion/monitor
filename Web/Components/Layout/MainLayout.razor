@@ -9,7 +9,7 @@
         </div>
 
         <AuthorizeView>
-            <Authorized>
+            <Authorized Context="auth">
                 <ul class="pm-nav">
                     <li>
                         <NavLink href="/" Match="NavLinkMatch.All">
@@ -42,7 +42,7 @@
                 <div class="pm-sidebar-footer">
                     <div class="pm-user-info">
                         <span class="pm-user-icon">👤</span>
-                        <context>@context.User.Identity?.Name</context>
+                        <span>@auth.User.Identity?.Name</span>
                     </div>
                     <a href="/auth/logout" class="pm-logout-btn">🚪 Logout</a>
                 </div>
