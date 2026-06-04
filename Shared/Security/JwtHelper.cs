@@ -46,6 +46,9 @@ public static class JwtHelper
         catch { return null; }
     }
 
-    public static Guid? GetInstitutionId(ClaimsPrincipal p) =>
-        Guid.TryParse(p.FindFirstValue("institution_id"), out var id) ? id : null;
+    public static Guid? GetInstitutionId(ClaimsPrincipal principal)
+    {
+        var raw = principal.FindFirst("institution_id")?.Value;
+        return Guid.TryParse(raw, out var id) ? id : null;
+    }
 }
