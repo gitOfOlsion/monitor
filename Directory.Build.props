@@ -40,7 +40,7 @@
     <SerilogConsoleVersion>6.0.0</SerilogConsoleVersion>
     <SerilogFileVersion>6.0.0</SerilogFileVersion>
     <SerilogSeqVersion>8.0.0</SerilogSeqVersion>
-    <SerilogConfigVersion>8.0.4</SerilogConfigVersion>
+    <SerilogConfigVersion>9.0.0</SerilogConfigVersion>
     <SerilogEnvVersion>3.0.0</SerilogEnvVersion>
     <SerilogThreadVersion>4.0.0</SerilogThreadVersion>
   </PropertyGroup>
