@@ -1,0 +1,74 @@
+@page "/events"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@inject ServerApiClient Api
+@inject RealtimeService Realtime
+
+<PageTitle>Events — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Device Events</h1>
+    <div class="pm-filters">
+        <input class="pm-input pm-input-sm" @bind="_fMachine" @bind:event="oninput" placeholder="Machine…" />
+        <select class="pm-input pm-input-sm" @bind="_fType">
+            <option value="">All types</option>
+            <option value="Connected">Connected</option>
+            <option value="Disconnected">Disconnected</option>
+        </select>
+        <select class="pm-input pm-input-sm" @bind="_fCat">
+            <option value="">All categories</option>
+            @foreach (var c in _cats) { <option value="@c">@c</option> }
+        </select>
+    </div>
+</div>
+
+<div class="pm-table-wrapper">
+    <table class="pm-table">
+        <thead><tr><th>Time</th><th>Machine</th><th>Event</th><th>Device</th><th>Category</th><th>Status</th></tr></thead>
+        <tbody>
+            @foreach (var e in Filtered)
+            {
+                <tr class="pm-event-row pm-event-@e.EventType.ToLower()">
+                    <td class="pm-mono">@e.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td>@e.MachineName</td>
+                    <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
+                    <td>@e.FriendlyName</td>
+                    <td>@e.Category</td>
+                    <td>@e.Status</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (!Filtered.Any()) { <div class="pm-empty">No events match filter.</div> }
+</div>
+
+@code {
+    private List<DeviceChangedPayload> _events = [];
+    private List<string> _cats = [];
+    private string _fMachine = "", _fType = "", _fCat = "";
+
+    private IEnumerable<DeviceChangedPayload> Filtered => _events.Where(e =>
+        (string.IsNullOrEmpty(_fMachine) || e.MachineName.Contains(_fMachine, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrEmpty(_fType)    || e.EventType == _fType) &&
+        (string.IsNullOrEmpty(_fCat)     || e.Category  == _fCat));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var db = await Api.GetEventsAsync(500) ?? [];
+        _events = db.Select(e => new DeviceChangedPayload(
+            e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
+            e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
+        _cats = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
+        await Realtime.EnsureConnectedAsync();
+        Realtime.OnDeviceChanged += OnLive;
+    }
+
+    private void OnLive(DeviceChangedPayload p)
+    {
+        _events.Insert(0, p); if (_events.Count > 500) _events.RemoveAt(500);
+        _cats = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
+        InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync() { Realtime.OnDeviceChanged -= OnLive; await Task.CompletedTask; }
+}
