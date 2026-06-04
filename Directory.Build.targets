@@ -33,8 +33,8 @@
   ────────────────────────────────────────────────────────────────────────── -->
   <Target Name="ValidateVersionProperties" BeforeTargets="Build">
     <Error
-      Condition="'$(MicrosoftAspNetCoreVersion)' == ''"
-      Text="[VersionGuard] MicrosoftAspNetCoreVersion is empty. Check Directory.Build.props." />
+      Condition="'$(AspNetCoreVersion)' == ''"
+      Text="[VersionGuard] AspNetCoreVersion is empty. Check Directory.Build.props." />
     <Error
       Condition="'$(EfCoreVersion)' == ''"
       Text="[VersionGuard] EfCoreVersion is empty. Check Directory.Build.props." />
