@@ -2,12 +2,13 @@ ARG DOTNET_VERSION=10.0
 
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS build
 WORKDIR /src
+
+COPY Directory.Build.props       ./
+COPY Directory.Build.targets     ./
 COPY Shared/PeripheralMonitor.Shared.csproj  Shared/
 COPY Server/PeripheralMonitor.Server.csproj  Server/
-# Copy build orchestration files so dotnet restore picks up centralised versions
-COPY Directory.Build.props .
-COPY Directory.Build.targets .
 RUN dotnet restore Server/PeripheralMonitor.Server.csproj
+
 COPY Shared/ Shared/
 COPY Server/ Server/
 RUN dotnet publish Server/PeripheralMonitor.Server.csproj \
