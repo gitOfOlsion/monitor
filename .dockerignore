@@ -1,0 +1,29 @@
+# Build artifacts — never send to Docker
+**/bin/
+**/obj/
+
+# Local secrets
+.env
+**/appsettings.local.json
+**/appsettings.Development.json
+
+# Logs
+**/logs/
+**/*.log
+
+# IDE
+.vs/
+.vscode/
+**/*.user
+**/.idea/
+
+# Git
+.git/
+.gitignore
+
+# Agent deployment artifacts
+**/*.service
+**/99-*.rules
+
+# macOS
+.DS_Store
