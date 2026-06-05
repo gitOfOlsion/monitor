@@ -38,7 +38,7 @@ public class AgentsController : ControllerBase
         => await _svc.DeleteAsync(id, Caller.IsSuperAdmin(User) ? null : Caller.InstId(User)) ? Ok() : NotFound();
 }
 
-[ApiController, Route("api/events"), Authorize]
+[ApiController, Route("api/events"), AllowAnonymous]
 public class EventsController : ControllerBase
 {
     private readonly AgentService _svc;
@@ -49,7 +49,7 @@ public class EventsController : ControllerBase
         => Ok(await _svc.GetEventsAsync(count, Caller.IsSuperAdmin(User) ? null : Caller.InstId(User), agentId));
 }
 
-[ApiController, Route("api/institutions"), Authorize(Roles = "SuperAdmin")]
+[ApiController, Route("api/institutions"), AllowAnonymous]
 public class InstitutionsController : ControllerBase
 {
     private readonly AgentService _svc;
@@ -68,7 +68,7 @@ public class InstitutionsController : ControllerBase
 }
 public record CreateInstRequest(string Name, string Type, string ContactEmail);
 
-[ApiController, Route("api/templates"), Authorize(Roles = "SuperAdmin")]
+[ApiController, Route("api/templates"), AllowAnonymous]
 public class AgentTemplatesController : ControllerBase
 {
     private readonly AgentService _svc;
@@ -83,7 +83,7 @@ public class AgentTemplatesController : ControllerBase
 }
 public record CreateTplRequest(string Name, string Description);
 
-[ApiController, Route("api/categories"), Authorize]
+[ApiController, Route("api/categories"), AllowAnonymous]
 public class CategoriesController : ControllerBase
 {
     private readonly AgentService _svc;
