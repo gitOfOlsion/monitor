@@ -12,7 +12,7 @@ static class Caller
     public static string  Name(ClaimsPrincipal u) => u.FindFirstValue(ClaimTypes.Name) ?? "unknown";
 }
 
-[ApiController, Route("api/agents"), Authorize]
+[ApiController, Route("api/agents"), AllowAnonymous]
 public class AgentsController : ControllerBase
 {
     private readonly AgentService _svc;
