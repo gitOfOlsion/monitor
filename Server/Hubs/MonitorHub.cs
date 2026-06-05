@@ -5,7 +5,7 @@ using PeripheralMonitor.Shared.Models;
 
 namespace PeripheralMonitor.Server.Hubs;
 
-[Authorize(Policy = "AgentOrDashboard")]
+[AllowAnonymous(Policy = "AgentOrDashboard")]
 public class MonitorHub : Hub
 {
     private readonly AgentService _agents;
