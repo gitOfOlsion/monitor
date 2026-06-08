@@ -28,10 +28,19 @@ try
         .ConfigureServices((_, svc) =>
         {
             svc.AddSingleton<DiscoveryService>();
+#if PLATFORM_WINDOWS
+            svc.AddSingleton<IDeviceMonitor>(sp =>
+                new WindowsDeviceMonitor(sp.GetRequiredService<ILogger<WindowsDeviceMonitor>>()));
+#elif PLATFORM_LINUX
+            svc.AddSingleton<IDeviceMonitor>(sp =>
+                new LinuxDeviceMonitor(sp.GetRequiredService<ILogger<LinuxDeviceMonitor>>()));
+#else
+            // Framework-dependent build (no RID) — detect at runtime
             svc.AddSingleton<IDeviceMonitor>(sp =>
                 OperatingSystem.IsWindows()
                     ? (IDeviceMonitor)new WindowsDeviceMonitor(sp.GetRequiredService<ILogger<WindowsDeviceMonitor>>())
                     : new LinuxDeviceMonitor(sp.GetRequiredService<ILogger<LinuxDeviceMonitor>>()));
+#endif
             svc.AddHostedService<AgentWorker>();
         })
         .Build();
