@@ -132,6 +132,12 @@ public class AgentService
         return await db.Institutions.OrderBy(i => i.Name).ToListAsync();
     }
 
+    public async Task<InstitutionEntity?> GetInstitutionAsync(Guid id)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        return await db.Institutions.FirstOrDefaultAsync(i => i.Id == id);
+    }
+
     public async Task<InstitutionEntity> CreateInstitutionAsync(string name, string type, string email)
     {
         await using var db = await _db.CreateDbContextAsync();
