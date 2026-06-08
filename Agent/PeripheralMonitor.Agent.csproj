@@ -1,5 +1,4 @@
 <Project Sdk="Microsoft.NET.Sdk.Worker">
-  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="$(AspNetCoreVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting"        Version="$(ExtensionsVersion)" />
@@ -9,10 +8,21 @@
     <PackageReference Include="Serilog.Sinks.Seq"                   Version="$(SerilogSeqVersion)" />
     <PackageReference Include="Serilog.Settings.Configuration"      Version="$(SerilogConfigVersion)" />
   </ItemGroup>
-  <!-- Windows-only service host -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(OS)' == 'Windows_NT'">
+
+  <!-- Windows-only: WMI + SetupAPI + Windows Service host -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'win-arm64'">
+    <PackageReference Include="System.Management"                         Version="$(ExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(ExtensionsVersion)" />
   </ItemGroup>
+
+  <!-- Exclude platform-specific files when cross-compiling -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR '$(RuntimeIdentifier)' == 'linux-arm64'">
+    <Compile Remove="WindowsDeviceMonitor.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'win-arm64'">
+    <Compile Remove="LinuxDeviceMonitor.cs" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />
   </ItemGroup>
