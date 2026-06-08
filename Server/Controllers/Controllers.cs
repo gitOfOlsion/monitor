@@ -48,7 +48,7 @@ public class EventsController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int count = 200, [FromQuery] Guid? agentId = null)
-        => Ok(await _svc.GetRecentEventsAsync(count, null, agentId));
+        => Ok(await _svc.GetEventsAsync(count, null, agentId));
 }
 
 [ApiController, Route("api/institutions"), AllowAnonymous]
@@ -58,7 +58,7 @@ public class InstitutionsController : ControllerBase
     public InstitutionsController(AgentService svc) => _svc = svc;
 
     [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _svc.GetAllInstitutionsAsync());
+    public async Task<IActionResult> GetAll() => Ok(await _svc.GetInstitutionsAsync());
 
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateInstRequest r)
