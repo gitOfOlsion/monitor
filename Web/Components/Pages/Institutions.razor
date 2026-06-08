@@ -1,6 +1,7 @@
 @page "/institutions"
 @attribute [Authorize(Roles = "SuperAdmin")]
 @inject ServerApiClient Api
+@inject NavigationManager Nav
 
 <PageTitle>Institutions — Peripheral Monitor</PageTitle>
 
@@ -14,14 +15,15 @@
     <div class="pm-modal-overlay" @onclick="() => _showCreate = false">
         <div class="pm-modal" @onclick:stopPropagation>
             <h2>New Institution</h2>
-            <div class="pm-field"><label>Name</label><input class="pm-input" @bind="_newName" /></div>
+            <div class="pm-field"><label>Name</label><input class="pm-input" @bind="_newName" placeholder="Tirana University" /></div>
             <div class="pm-field"><label>Type</label>
                 <select class="pm-input" @bind="_newType">
                     <option value="University">University</option><option value="School">School</option>
-                    <option value="Company">Company</option><option value="Other">Other</option>
+                    <option value="Company">Company</option><option value="Hospital">Hospital</option>
+                    <option value="Government">Government</option><option value="Other">Other</option>
                 </select>
             </div>
-            <div class="pm-field"><label>Contact Email</label><input class="pm-input" @bind="_newEmail" type="email" /></div>
+            <div class="pm-field"><label>Contact Email</label><input class="pm-input" @bind="_newEmail" type="email" placeholder="it@@institution.edu" /></div>
             <div class="pm-modal-actions">
                 <button class="pm-btn pm-btn-secondary" @onclick="() => _showCreate = false">Cancel</button>
                 <button class="pm-btn pm-btn-primary" @onclick="CreateAsync" disabled="@(string.IsNullOrWhiteSpace(_newName))">Create</button>
@@ -30,24 +32,55 @@
     </div>
 }
 
-@if (_token != null)
+@if (_showToken != null)
 {
-    <div class="pm-modal-overlay" @onclick="() => _token = null">
+    <div class="pm-modal-overlay" @onclick="() => _showToken = null">
         <div class="pm-modal pm-modal-wide" @onclick:stopPropagation>
-            <h2>Agent Provision Token</h2>
-            <p class="pm-modal-hint">Place in <code>appsettings.local.json</code> on the target machine.</p>
-            <div class="pm-field"><textarea class="pm-input pm-mono pm-textarea" readonly>@GetJson()</textarea></div>
-            <div class="pm-modal-actions"><button class="pm-btn pm-btn-secondary" @onclick="() => _token = null">Close</button></div>
+            <h2>📦 Download Agent for @_tokenInstName</h2>
+            <p class="pm-modal-hint">
+                Download the agent package for the target platform. It includes the binary,
+                installer script, and a pre-configured token for <strong>@_tokenInstName</strong>.
+            </p>
+
+            <div class="pm-download-grid">
+                <a class="pm-download-card" href="@GetDownloadUrl("windows")" target="_blank">
+                    <span class="pm-download-icon">🪟</span>
+                    <span class="pm-download-label">Download for Windows</span>
+                    <span class="pm-download-hint">Run install.ps1 as Administrator</span>
+                </a>
+                <a class="pm-download-card" href="@GetDownloadUrl("linux")" target="_blank">
+                    <span class="pm-download-icon">🐧</span>
+                    <span class="pm-download-label">Download for Linux</span>
+                    <span class="pm-download-hint">Run: sudo bash install.sh</span>
+                </a>
+            </div>
+
+            <details style="margin-top:1rem">
+                <summary style="cursor:pointer;font-size:13px;color:var(--text-muted)">
+                    Or copy token manually (advanced)
+                </summary>
+                <div class="pm-field" style="margin-top:.75rem">
+                    <label>appsettings.local.json</label>
+                    <textarea class="pm-input pm-mono pm-textarea" readonly>@GetManualJson()</textarea>
+                </div>
+            </details>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="() => _showToken = null">Close</button>
+            </div>
         </div>
     </div>
 }
 
-@if (_loading) { <div class="pm-loading">Loading…</div> }
+@if (_loading)
+{ <div class="pm-loading">Loading…</div> }
 else
 {
     <div class="pm-table-wrapper">
         <table class="pm-table">
-            <thead><tr><th>Name</th><th>Slug</th><th>Type</th><th>Contact</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead><tr>
+                <th>Name</th><th>Slug</th><th>Type</th><th>Contact</th><th>Created</th><th>Actions</th>
+            </tr></thead>
             <tbody>
                 @foreach (var i in _institutions)
                 {
@@ -57,30 +90,85 @@ else
                         <td>@i.Type</td>
                         <td>@i.ContactEmail</td>
                         <td>@i.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
-                        <td><button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => GetTokenAsync(i)">🔑 Provision</button></td>
+                        <td class="pm-actions">
+                            <button class="pm-btn pm-btn-primary pm-btn-sm"
+                                    @onclick="() => ShowDownloads(i)">
+                                📦 Download Agent
+                            </button>
+                        </td>
                     </tr>
                 }
             </tbody>
         </table>
-        @if (!_institutions.Any()) { <div class="pm-empty">No institutions yet.</div> }
+        @if (!_institutions.Any())
+        { <div class="pm-empty">No institutions yet. Create the first one above.</div> }
     </div>
 }
+
+@if (_message != null)
+{ <div class="pm-toast @(_isError ? "pm-toast-error" : "pm-toast-success")">@_message</div> }
+
+<style>
+    .pm-download-grid { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .pm-download-card {
+        flex: 1; min-width: 200px; display: flex; flex-direction: column;
+        align-items: center; gap: .5rem; padding: 1.5rem 1rem;
+        background: var(--surface2); border: 2px solid var(--border);
+        border-radius: var(--radius); text-decoration: none; color: var(--text);
+        transition: border-color .15s, background .15s; cursor: pointer;
+    }
+    .pm-download-card:hover { border-color: var(--primary); background: var(--surface); }
+    .pm-download-icon  { font-size: 2.5rem; }
+    .pm-download-label { font-weight: 600; font-size: 14px; }
+    .pm-download-hint  { font-size: 12px; color: var(--text-muted); }
+</style>
 
 @code {
     private List<InstitutionDto> _institutions = [];
     private bool _loading = true, _showCreate;
     private string _newName = "", _newType = "University", _newEmail = "";
-    private string? _token; private string _tokenInst = "";
+    private InstitutionDto? _showToken;
+    private string _tokenInstName = "";
+    private string? _provisionToken;
+    private string? _message;
+    private bool _isError;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
-    private async Task LoadAsync() { _loading = true; _institutions = await Api.GetInstitutionsAsync() ?? []; _loading = false; }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _institutions = await Api.GetInstitutionsAsync() ?? [];
+        _loading = false;
+    }
 
     private async Task CreateAsync()
     {
         var r = await Api.CreateInstitutionAsync(_newName, _newType, _newEmail);
-        if (r != null) { _showCreate = false; _newName = _newEmail = ""; await LoadAsync(); }
+        if (r != null) { _showCreate = false; _newName = _newEmail = ""; Toast("Institution created.", false); await LoadAsync(); }
+        else Toast("Failed to create institution.", true);
     }
 
-    private async Task GetTokenAsync(InstitutionDto inst) { _token = await Api.GetProvisionTokenAsync(inst.Id); _tokenInst = inst.Name; }
-    private string GetJson() => $$"""{ "SignalRUrl": "https://your-domain.com/monitor", "JwtToken": "{{_token}}" }""";
+    private async Task ShowDownloads(InstitutionDto inst)
+    {
+        _showToken      = inst;
+        _tokenInstName  = inst.Name;
+        _provisionToken = await Api.GetProvisionTokenAsync(inst.Id);
+    }
+
+    private string GetDownloadUrl(string platform) =>
+        $"/api/download/{_showToken?.Id}/{platform}";
+
+    private string GetManualJson() => $$"""
+        {
+          "SignalRUrl": "{{Nav.BaseUri.TrimEnd('/')}}monitor",
+          "JwtToken": "{{_provisionToken}}"
+        }
+        """;
+
+    private void Toast(string msg, bool err)
+    {
+        _message = msg; _isError = err;
+        _ = Task.Delay(4000).ContinueWith(_ => { _message = null; InvokeAsync(StateHasChanged); });
+    }
 }

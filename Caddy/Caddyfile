@@ -1,22 +1,35 @@
+# Development: listens on :80 (HTTP)
+# Production:  replace :80 with your domain (e.g. monitor.yourdomain.com)
+#              Caddy will auto-provision TLS via Let's Encrypt
 :80 {
+
+    # Blazor Server dashboard (default)
     @web {
         not path /api/* /monitor /monitor/* /health /seq/*
     }
     handle @web {
         reverse_proxy web:5001
     }
+
+    # Server REST API
     handle /api/* {
         reverse_proxy server:5000
     }
+
+    # SignalR hub (agents + web dashboard)
     handle /monitor* {
         reverse_proxy server:5000
     }
+
     handle /health {
         reverse_proxy server:5000
     }
+
+    # Seq log viewer
     handle /seq/* {
         uri strip_prefix /seq
         reverse_proxy seq:80
     }
+
     encode gzip
 }

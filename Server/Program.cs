@@ -74,6 +74,7 @@ try
     builder.Services.AddCors(o => o.AddPolicy("Dev", p =>
         p.AllowAnyMethod().AllowAnyHeader().SetIsOriginAllowed(_ => true).AllowCredentials()));
     builder.Services.AddScoped<AgentService>();
+    builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
     builder.Services.AddHostedService<OfflineDetectorService>();
     builder.Services.AddControllers();
@@ -85,6 +86,9 @@ try
         var db      = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var userMgr = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
         var roleMgr = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        // EnsureCreated works without migration files — creates tables from model directly.
+        // Switch to MigrateAsync once you generate migrations with:
+        //   dotnet ef migrations add InitialCreate --project Server --startup-project Server
         await db.Database.EnsureCreatedAsync();
 
         foreach (var role in new[] { "SuperAdmin", "InstitutionAdmin", "Viewer" })
