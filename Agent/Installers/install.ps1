@@ -114,12 +114,20 @@ if (-not $dotnetInstalled) {
 
 Write-Step "Configuring service account '$ServiceUser'..."
 
+# Password generator — works on all PowerShell versions without System.Web
+function New-RandomPassword {
+    param([int]$Length = 24)
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
+    $bytes = [byte[]]::new($Length)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+    $pw = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+    return $pw
+}
+
 $userExists = Get-LocalUser -Name $ServiceUser -ErrorAction SilentlyContinue
 
 if (-not $userExists) {
-    # Generate a strong random password
-    Add-Type -AssemblyName System.Web
-    $password = [System.Web.Security.Membership]::GeneratePassword(24, 6)
+    $password   = New-RandomPassword
     $securePass = ConvertTo-SecureString $password -AsPlainText -Force
 
     New-LocalUser -Name $ServiceUser `
@@ -131,14 +139,10 @@ if (-not $userExists) {
                   -AccountNeverExpires | Out-Null
 
     Write-Ok "Service account '$ServiceUser' created"
-
-    # Store password securely for service registration
     $script:svcPassword = $securePass
 } else {
     Write-Ok "Service account '$ServiceUser' already exists"
-    # Reset password for service registration
-    Add-Type -AssemblyName System.Web
-    $password = [System.Web.Security.Membership]::GeneratePassword(24, 6)
+    $password   = New-RandomPassword
     $securePass = ConvertTo-SecureString $password -AsPlainText -Force
     Set-LocalUser -Name $ServiceUser -Password $securePass
     $script:svcPassword = $securePass
