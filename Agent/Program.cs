@@ -19,12 +19,18 @@ try
             cfg.AddEnvironmentVariables(prefix: "PM_");
         })
         .UseSerilog((ctx, svc, cfg) =>
+        {
             cfg.ReadFrom.Configuration(ctx.Configuration).ReadFrom.Services(svc)
                .Enrich.FromLogContext().Enrich.WithMachineName()
                .Enrich.WithProperty("Application", "Agent")
                .WriteTo.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {Message:lj}{NewLine}{Exception}")
-               .WriteTo.File(Path.Combine(exeDir, "logs", "agent-.log"), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14)
-               .WriteTo.Seq(ctx.Configuration["Seq:Url"] ?? "http://localhost:5341"))
+               .WriteTo.File(Path.Combine(exeDir, "logs", "agent-.log"), rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14);
+
+            // Seq is optional — only add if a valid URL is configured
+            var seqUrl = ctx.Configuration["Seq:Url"];
+            if (!string.IsNullOrEmpty(seqUrl) && Uri.TryCreate(seqUrl, UriKind.Absolute, out _))
+                cfg.WriteTo.Seq(seqUrl);
+        })
         .ConfigureServices((_, svc) =>
         {
             svc.AddSingleton<DiscoveryService>();

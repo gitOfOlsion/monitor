@@ -81,12 +81,38 @@ public class AgentService
         db.Agents.Remove(a); await db.SaveChangesAsync(); return true;
     }
 
-    public async Task UpdateHeartbeatAsync(string machineName, Guid institutionId, DateTime ts, int count)
+    public async Task UpdateHeartbeatAsync(string machineName, string macAddress, Guid institutionId, DateTime ts, int count)
     {
         await using var db = await _db.CreateDbContextAsync();
         var a = await db.Agents.FirstOrDefaultAsync(x => x.MachineName == machineName && x.InstitutionId == institutionId);
-        if (a == null) return;
-        a.LastHeartbeat = ts; a.DeviceCount = count; a.Status = "Approved";
+
+        // Auto-register: agent has a valid institution JWT but no DB record yet
+        // This happens when agents connect over the internet (no UDP discovery)
+        if (a == null)
+        {
+            if (!await db.Institutions.AnyAsync(i => i.Id == institutionId))
+                return; // invalid institution — ignore
+
+            a = new AgentEntity
+            {
+                InstitutionId = institutionId,
+                MachineName   = machineName,
+                IPAddress     = "remote",
+                MacAddress    = macAddress ?? "unknown",
+                Platform      = "Unknown",
+                FirstSeen     = DateTime.UtcNow,
+                Status        = "Approved", // auto-approve — JWT is proof of authorization
+                ApprovedBy    = "auto-provision",
+                ApprovedAt    = DateTime.UtcNow
+            };
+            db.Agents.Add(a);
+            _logger.LogInformation("Auto-registered agent: {Machine} ({Mac}) for institution {Inst}",
+                machineName, macAddress, institutionId);
+        }
+
+        a.LastHeartbeat = ts;
+        a.DeviceCount   = count;
+        a.Status        = "Approved";
         await db.SaveChangesAsync();
     }
 
@@ -95,7 +121,15 @@ public class AgentService
         await using var db = await _db.CreateDbContextAsync();
         var agent = await db.Agents.FirstOrDefaultAsync(a =>
             a.MachineName == p.MachineName && a.InstitutionId == p.InstitutionId);
-        if (agent == null) return;
+
+        // If agent not found, the heartbeat hasn't arrived yet — skip this event
+        // (heartbeat auto-registers, next event will succeed)
+        if (agent == null)
+        {
+            _logger.LogDebug("No agent record for {Machine} — skipping event (will register on next heartbeat)", p.MachineName);
+            return;
+        }
+
         var cat = await db.DeviceCategories.FirstOrDefaultAsync(c => c.Name == p.Category);
         db.DeviceEvents.Add(new DeviceEventEntity
         {
