@@ -50,8 +50,7 @@ public class AgentPackageService
         var settingsJson = $$"""
             {
               "SignalRUrl": "{{serverUrl}}/monitor",
-              "JwtToken": "{{token}}",
-              "Seq": { "Url": "{{serverUrl.Replace("https://", "http://").Replace("http://", "http://seq:")}}" }
+              "JwtToken": "{{token}}"
             }
             """;
         var settingsEntry = zip.CreateEntry("appsettings.local.json", CompressionLevel.Optimal);
