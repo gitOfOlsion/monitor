@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!-- TargetFramework, Nullable, ImplicitUsings from Directory.Build.props -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer"     Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="$(AspNetCoreVersion)" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"              Version="$(EfCoreVersion)" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"             Version="$(NpgsqlEfVersion)" />
+    <PackageReference Include="Serilog.AspNetCore"                                Version="$(SerilogAspNetCoreVersion)" />
+    <PackageReference Include="Serilog.Sinks.Seq"                                 Version="$(SerilogSeqVersion)" />
+    <PackageReference Include="Serilog.Enrichers.Environment"                     Version="$(SerilogEnvVersion)" />
+    <PackageReference Include="Serilog.Enrichers.Thread"                          Version="$(SerilogThreadVersion)" />
+    <PackageReference Include="Serilog.Settings.Configuration"                    Version="$(SerilogConfigVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />
+  </ItemGroup>
+</Project>
