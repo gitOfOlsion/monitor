@@ -77,7 +77,7 @@ try
     builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
     builder.Services.AddHostedService<OfflineDetectorService>();
-    builder.Services.AddControllers();
+    builder.Services.AddControllers().AddJsonOptions(o => o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles);
 
     var app = builder.Build();
 
