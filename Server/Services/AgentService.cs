@@ -106,7 +106,7 @@ public class AgentService
                 ApprovedAt    = DateTime.UtcNow
             };
             db.Agents.Add(a);
-            _logger.LogInformation("Auto-registered agent: {Machine} ({Mac}) for institution {Inst}",
+            _log.LogInformation("Auto-registered agent: {Machine} ({Mac}) for institution {Inst}",
                 machineName, macAddress, institutionId);
         }
 
@@ -126,7 +126,7 @@ public class AgentService
         // (heartbeat auto-registers, next event will succeed)
         if (agent == null)
         {
-            _logger.LogDebug("No agent record for {Machine} — skipping event (will register on next heartbeat)", p.MachineName);
+            _log.LogDebug("No agent record for {Machine} — skipping event (will register on next heartbeat)", p.MachineName);
             return;
         }
 
