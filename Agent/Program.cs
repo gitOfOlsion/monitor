@@ -10,6 +10,7 @@ Log.Logger = new LoggerConfiguration().MinimumLevel.Override("Microsoft", LogEve
 try
 {
     var host = Host.CreateDefaultBuilder(args)
+        .UseWindowsService(options => options.ServiceName = "PeripheralMonitorAgent")
         .UseContentRoot(exeDir)
         .ConfigureAppConfiguration((_, cfg) =>
         {
