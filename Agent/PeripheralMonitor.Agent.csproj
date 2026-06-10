@@ -9,6 +9,7 @@
     <PackageReference Include="Serilog.Sinks.Seq"                   Version="$(SerilogSeqVersion)" />
     <PackageReference Include="Serilog.Settings.Configuration"      Version="$(SerilogConfigVersion)" />
     <PackageReference Include="Serilog.Enrichers.Environment"       Version="$(SerilogEnvVersion)" />
+    <PackageReference Include="System.Management"                   Version="$(ExtensionsVersion)" />
   </ItemGroup>
 
   <!-- Windows-only packages
