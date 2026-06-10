@@ -2,6 +2,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="$(AspNetCoreVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting"        Version="$(ExtensionsVersion)" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(ExtensionsVersion)" />
     <PackageReference Include="Serilog.Extensions.Hosting"          Version="$(SerilogHostingVersion)" />
     <PackageReference Include="Serilog.Sinks.Console"               Version="$(SerilogConsoleVersion)" />
     <PackageReference Include="Serilog.Sinks.File"                  Version="$(SerilogFileVersion)" />
@@ -10,11 +11,11 @@
     <PackageReference Include="Serilog.Enrichers.Environment"       Version="$(SerilogEnvVersion)" />
   </ItemGroup>
 
-  <!-- Windows-only packages -->
+  <!-- Windows-only packages
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'win-x64' OR '$(RuntimeIdentifier)' == 'win-arm64'">
     <PackageReference Include="System.Management"                         Version="$(ExtensionsVersion)" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="$(ExtensionsVersion)" />
-  </ItemGroup>
+  </ItemGroup>-->
 
   <!-- Exclude platform-specific source files when cross-compiling -->
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR '$(RuntimeIdentifier)' == 'linux-arm64'">
