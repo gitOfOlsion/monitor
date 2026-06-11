@@ -4,7 +4,7 @@
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
 
-<PageTitle>Events — Peripheral Monitor</PageTitle>
+<PageTitle>Device Events</PageTitle>
 
 <div class="pm-page-header">
     <h1>Device Events</h1>
@@ -23,16 +23,33 @@
 </div>
 
 <div class="pm-table-wrapper">
-    <table class="pm-table">
-        <thead><tr><th>Time</th><th>Machine</th><th>Event</th><th>Device</th><th>Category</th><th>Status</th></tr></thead>
+    <table class="pm-table" style="table-layout:fixed;width:100%">
+        <colgroup>
+            <col style="width:16%" />
+            <col style="width:14%" />
+            <col style="width:12%" />
+            <col style="width:32%" />
+            <col style="width:14%" />
+            <col style="width:12%" />
+        </colgroup>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Machine</th>
+                <th>Event</th>
+                <th>Device</th>
+                <th>Category</th>
+                <th>Status</th>
+            </tr>
+        </thead>
         <tbody>
             @foreach (var e in Filtered)
             {
-                <tr class="pm-event-row pm-event-@e.EventType.ToLower()">
+                <tr>
                     <td class="pm-mono">@e.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
                     <td>@e.MachineName</td>
                     <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
-                    <td>@e.FriendlyName</td>
+                    <td class="pm-truncate">@e.FriendlyName</td>
                     <td>@e.Category</td>
                     <td>@e.Status</td>
                 </tr>
@@ -41,6 +58,7 @@
     </table>
     @if (!Filtered.Any()) { <div class="pm-empty">No events match filter.</div> }
 </div>
+<div class="pm-table-footer">Showing @Filtered.Count() of @_events.Count events</div>
 
 @code {
     private List<DeviceChangedPayload> _events = [];
