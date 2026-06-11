@@ -16,7 +16,7 @@ public class MonitorHub : Hub
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
         _log.LogDebug("Heartbeat: {Machine} inst={Inst} devices={N}", p.MachineName, p.InstitutionId, p.DeviceCount);
-        await _agents.UpdateHeartbeatAsync(p.MachineName, p.MacAddress, p.InstitutionId, p.Timestamp, p.DeviceCount);
+        await _agents.UpdateHeartbeatAsync(p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount);
         await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnAgentHeartbeat", p);
         await Clients.Group("superadmin").SendAsync("OnAgentHeartbeat", p);
     }

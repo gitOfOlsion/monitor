@@ -62,7 +62,7 @@ public class AgentWorker : BackgroundService
                 {
                     var snap = await _monitor.GetSnapshotAsync();
                     await _hub.SendAsync("AgentHeartbeat",
-                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, DateTime.UtcNow, snap.Count), ct);
+                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count), ct);
                     _log.LogDebug("Heartbeat — {N} devices", snap.Count);
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)
