@@ -81,17 +81,16 @@ public class AgentService
         db.Agents.Remove(a); await db.SaveChangesAsync(); return true;
     }
 
-    public async Task UpdateHeartbeatAsync(string machineName, string macAddress, Guid institutionId, DateTime ts, int count)
+    public async Task UpdateHeartbeatAsync(string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count)
     {
         await using var db = await _db.CreateDbContextAsync();
         var a = await db.Agents.FirstOrDefaultAsync(x => x.MachineName == machineName && x.InstitutionId == institutionId);
 
         // Auto-register: agent has a valid institution JWT but no DB record yet
-        // This happens when agents connect over the internet (no UDP discovery)
         if (a == null)
         {
             if (!await db.Institutions.AnyAsync(i => i.Id == institutionId))
-                return; // invalid institution — ignore
+                return;
 
             a = new AgentEntity
             {
@@ -99,16 +98,22 @@ public class AgentService
                 MachineName   = machineName,
                 IPAddress     = "remote",
                 MacAddress    = macAddress ?? "unknown",
-                Platform      = "Unknown",
+                Platform      = platform ?? "Unknown",
                 FirstSeen     = DateTime.UtcNow,
-                Status        = "Approved", // auto-approve — JWT is proof of authorization
+                Status        = "Approved",
                 ApprovedBy    = "auto-provision",
                 ApprovedAt    = DateTime.UtcNow
             };
             db.Agents.Add(a);
-            _log.LogInformation("Auto-registered agent: {Machine} ({Mac}) for institution {Inst}",
-                machineName, macAddress, institutionId);
+            _log.LogInformation("Auto-registered agent: {Machine} ({Mac}) [{Platform}] for institution {Inst}",
+                machineName, macAddress, platform, institutionId);
         }
+
+        // Update platform if it was previously Unknown
+        if (a.Platform == "Unknown" && !string.IsNullOrEmpty(platform) && platform != "Unknown")
+            a.Platform = platform;
+        if (a.MacAddress == "unknown" && !string.IsNullOrEmpty(macAddress) && macAddress != "unknown")
+            a.MacAddress = macAddress;
 
         a.LastHeartbeat = ts;
         a.DeviceCount   = count;

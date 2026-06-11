@@ -232,3 +232,15 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 /* ── Misc ──────────────────────────────────────────────────────────────── */
 .pm-loading { color: var(--text-muted); padding: 2rem; text-align: center; }
 .pm-empty   { color: var(--text-muted); padding: 2rem; text-align: center; font-size: 13px; }
+
+/* ── Institution group headers ─────────────────────────────────────── */
+.pm-group-header {
+  font-size: 13px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--text-muted);
+  margin: 1.25rem 0 .5rem; padding-bottom: .35rem;
+  border-bottom: 2px solid var(--border);
+}
+
+/* ── Fixed table layout for alignment ──────────────────────────────── */
+.pm-table-fixed { table-layout: fixed; }
+.pm-table-fixed td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

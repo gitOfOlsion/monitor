@@ -14,11 +14,12 @@ public record DiscoveryBroadcast(
 );
 
 public record HeartbeatPayload(
-    string   MachineName,
-    string   MacAddress,
-    Guid     InstitutionId,
-    DateTime Timestamp,
-    int      DeviceCount
+    string        MachineName,
+    string        MacAddress,
+    Guid          InstitutionId,
+    string        Platform,       // "Windows" or "Linux"
+    DateTime      Timestamp,
+    int           DeviceCount
 );
 
 public record DeviceChangedPayload(
