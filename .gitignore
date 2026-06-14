@@ -2,7 +2,6 @@ bin/
 obj/
 .vs/
 *.user
-.env
 appsettings.local.json
 logs/
 *.log
