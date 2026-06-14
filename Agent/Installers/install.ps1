@@ -1,6 +1,6 @@
 #Requires -RunAsAdministrator
 param(
-    [string]$InstallPath  = "C:\Program Files\PeripheralMonitor",
+    [string]$InstallPath  = "C:\PeripheralMonitor",
     [string]$ServiceName  = "PeripheralMonitorAgent",
     [string]$ServiceUser  = "PeripheralMonitorSvc",
     [string]$DotNetVersion = "10.0"
@@ -16,10 +16,8 @@ function Write-Fail($msg) { Write-Host "    [FAIL] $msg" -ForegroundColor Red }
 function New-RandomPassword {
     param([int]$Length = 24)
     $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
-    $rng   = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
     $bytes = [byte[]]::new($Length)
-    $rng.GetBytes($bytes)
-    $rng.Dispose()
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
     return -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
 }
 

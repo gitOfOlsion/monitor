@@ -244,3 +244,32 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 /* ── Fixed table layout for alignment ──────────────────────────────── */
 .pm-table-fixed { table-layout: fixed; }
 .pm-table-fixed td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Role badges ───────────────────────────────────────────────────── */
+.pm-badge-superadmin       { background:#7c3aed; color:#fff; }
+.pm-badge-institutionadmin { background:#2563eb; color:#fff; }
+.pm-badge-viewer           { background:#6b7280; color:#fff; }
+
+/* ── Sidebar user detail ───────────────────────────────────────────── */
+.pm-user-detail { display:flex; flex-direction:column; line-height:1.3; }
+.pm-user-name   { font-weight:600; font-size:13px; }
+.pm-user-role   { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; }
+.pm-user-inst   { font-size:11px; color:var(--text-muted); }
+
+/* ── Toast notifications ───────────────────────────────────────────── */
+.pm-toast {
+  position:fixed; bottom:1.5rem; right:1.5rem; z-index:1000;
+  padding:.75rem 1.25rem; border-radius:var(--radius);
+  font-size:14px; font-weight:500; box-shadow:0 4px 16px rgba(0,0,0,.15);
+  animation:pm-toast-in .2s ease;
+}
+.pm-toast-success { background:#059669; color:#fff; }
+.pm-toast-error   { background:#dc2626; color:#fff; }
+@keyframes pm-toast-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+
+/* ── Alert (error) inside modals ───────────────────────────────────── */
+.pm-alert-error { background:#fef2f2; color:#991b1b; border:1px solid #fecaca;
+                  padding:.6rem .8rem; border-radius:var(--radius); font-size:13px; margin-bottom:.75rem; }
+
+/* ── Truncating cells ──────────────────────────────────────────────── */
+.pm-truncate { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

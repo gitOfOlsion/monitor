@@ -27,13 +27,28 @@
                         </NavLink>
                     </li>
 
-                    <!-- SuperAdmin-only links -->
-                    <AuthorizeView Roles="SuperAdmin">
+                    <!-- Admin links: SuperAdmin + InstitutionAdmin -->
+                    <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="adminAuth">
                         <li class="pm-nav-divider"></li>
                         <li class="pm-nav-section">Administration</li>
                         <li>
+                            <NavLink href="/users">
+                                <span class="pm-nav-icon">👥</span> Users
+                            </NavLink>
+                        </li>
+                        <li>
+                            <NavLink href="/audit">
+                                <span class="pm-nav-icon">📜</span> Audit Log
+                            </NavLink>
+                        </li>
+                    </AuthorizeView>
+
+                    <!-- Institution access: SuperAdmin sees all, InstitutionAdmin sees their own -->
+                    <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="instAuth">
+                        <li>
                             <NavLink href="/institutions">
-                                <span class="pm-nav-icon">🏛️</span> Institutions
+                                <span class="pm-nav-icon">🏛️</span>
+                                @(instAuth.User.IsInRole("SuperAdmin") ? "Institutions" : "My Institution")
                             </NavLink>
                         </li>
                     </AuthorizeView>
@@ -42,7 +57,15 @@
                 <div class="pm-sidebar-footer">
                     <div class="pm-user-info">
                         <span class="pm-user-icon">👤</span>
-                        <span>@auth.User.Identity?.Name</span>
+                        <div class="pm-user-detail">
+                            <span class="pm-user-name">@auth.User.Identity?.Name</span>
+                            <span class="pm-user-role">@auth.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
+                            @{
+                                var inst = auth.User.FindFirst("institution_name")?.Value;
+                            }
+                            @if (!string.IsNullOrEmpty(inst))
+                            { <span class="pm-user-inst">@inst</span> }
+                        </div>
                     </div>
                     <a href="/auth/logout" class="pm-logout-btn">🚪 Logout</a>
                 </div>

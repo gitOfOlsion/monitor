@@ -74,10 +74,13 @@ try
     builder.Services.AddCors(o => o.AddPolicy("Dev", p =>
         p.AllowAnyMethod().AllowAnyHeader().SetIsOriginAllowed(_ => true).AllowCredentials()));
     builder.Services.AddScoped<AgentService>();
+    builder.Services.AddScoped<UserService>();
+    builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
     builder.Services.AddHostedService<OfflineDetectorService>();
-    builder.Services.AddControllers().AddJsonOptions(o => o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles);
+    builder.Services.AddControllers().AddJsonOptions(o =>
+        o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles);
 
     var app = builder.Build();
 

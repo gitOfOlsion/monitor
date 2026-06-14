@@ -104,3 +104,59 @@ public class DeviceCategoryDto
     public string Icon        { get; set; } = "";
     public string Description { get; set; } = "";
 }
+
+// ── User management DTOs ──────────────────────────────────────────────────
+public class UserDto
+{
+    public string   Id              { get; set; } = "";
+    public string   UserName        { get; set; } = "";
+    public string   Email           { get; set; } = "";
+    public string   Role            { get; set; } = "Viewer";
+    public Guid?    InstitutionId   { get; set; }
+    public string?  InstitutionName { get; set; }
+    public DateTime CreatedAt       { get; set; }
+}
+
+public record CreateUserRequest(
+    string  UserName,
+    string  Email,
+    string  Password,
+    string  Role,            // InstitutionAdmin | Viewer (SuperAdmin only via seed)
+    Guid?   InstitutionId
+);
+
+// ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────
+public record ValidateLoginRequest(string UserName, string Password);
+
+public record ValidateLoginResponse(
+    bool    Success,
+    string? UserId,
+    string? UserName,
+    string? Role,
+    Guid?   InstitutionId,
+    string? InstitutionName
+);
+
+// ── Audit DTOs ────────────────────────────────────────────────────────────
+public class AuditLogDto
+{
+    public long     Id            { get; set; }
+    public DateTime Timestamp     { get; set; }
+    public string   Actor         { get; set; } = "";
+    public string   ActorRole     { get; set; } = "";
+    public Guid?    InstitutionId { get; set; }
+    public string   Action        { get; set; } = "";
+    public string   Target        { get; set; } = "";
+    public string?  Details       { get; set; }
+    public string?  IpAddress     { get; set; }
+}
+
+public record CreateAuditRequest(
+    string  Actor,
+    string  ActorRole,
+    Guid?   InstitutionId,
+    string  Action,
+    string  Target,
+    string? Details,
+    string? IpAddress
+);

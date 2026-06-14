@@ -1,8 +1,10 @@
 @page "/"
 @attribute [Authorize]
 @implements IAsyncDisposable
+@using System.Security.Claims
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Dashboard</PageTitle>
 
@@ -71,7 +73,11 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Realtime.EnsureConnectedAsync();
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
+        var inst = auth.User.FindFirst("institution_id")?.Value;
+
+        await Realtime.EnsureConnectedAsync(role, inst);
         Realtime.OnHeartbeat     += HandleHeartbeat;
         Realtime.OnDeviceChanged += HandleDeviceChanged;
 

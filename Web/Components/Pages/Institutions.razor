@@ -1,13 +1,17 @@
 @page "/institutions"
-@attribute [Authorize(Roles = "SuperAdmin")]
+@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
 @inject ServerApiClient Api
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Institutions — Peripheral Monitor</PageTitle>
 
 <div class="pm-page-header">
-    <h1>Institutions</h1>
-    <button class="pm-btn pm-btn-primary" @onclick="() => _showCreate = true">+ New Institution</button>
+    <h1>@(_isSuperAdmin ? "Institutions" : "My Institution")</h1>
+    @if (_isSuperAdmin)
+    {
+        <button class="pm-btn pm-btn-primary" @onclick="() => _showCreate = true">+ New Institution</button>
+    }
 </div>
 
 @if (_showCreate)
@@ -101,7 +105,11 @@ else
             </tbody>
         </table>
         @if (!_institutions.Any())
-        { <div class="pm-empty">No institutions yet. Create the first one above.</div> }
+        {
+            <div class="pm-empty">
+                @(_isSuperAdmin ? "No institutions yet. Create the first one above." : "Your institution is not configured yet. Contact your administrator.")
+            </div>
+        }
     </div>
 }
 
@@ -125,7 +133,7 @@ else
 
 @code {
     private List<InstitutionDto> _institutions = [];
-    private bool _loading = true, _showCreate;
+    private bool _loading = true, _showCreate, _isSuperAdmin;
     private string _newName = "", _newType = "University", _newEmail = "";
     private InstitutionDto? _showToken;
     private string _tokenInstName = "";
@@ -133,7 +141,12 @@ else
     private string? _message;
     private bool _isError;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
