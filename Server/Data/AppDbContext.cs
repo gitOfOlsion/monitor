@@ -90,6 +90,20 @@ public class DeviceEventEntity
     public DeviceCategoryEntity? DeviceCategory { get; set; }
 }
 
+// ── Audit log ───────────────────────────────────────────────────────────
+public class AuditLogEntity
+{
+    public long     Id            { get; set; }
+    public DateTime Timestamp     { get; set; } = DateTime.UtcNow;
+    public string   Actor         { get; set; } = "";   // username who did it
+    public string   ActorRole     { get; set; } = "";   // their role at the time
+    public Guid?    InstitutionId { get; set; }         // scope (null = global/superadmin)
+    public string   Action        { get; set; } = "";   // e.g. "agent.approve", "user.create", "login"
+    public string   Target        { get; set; } = "";   // what was acted on (machine name, username, etc.)
+    public string?  Details       { get; set; }         // optional JSON / free text
+    public string?  IpAddress     { get; set; }
+}
+
 // ── DbContext ─────────────────────────────────────────────────────────────
 public class AppDbContext : IdentityDbContext<AppUser>
 {
@@ -100,6 +114,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<AgentEntity>          Agents          => Set<AgentEntity>();
     public DbSet<DeviceCategoryEntity> DeviceCategories=> Set<DeviceCategoryEntity>();
     public DbSet<DeviceEventEntity>    DeviceEvents    => Set<DeviceEventEntity>();
+    public DbSet<AuditLogEntity>       AuditLogs       => Set<AuditLogEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -176,6 +191,15 @@ public class AppDbContext : IdentityDbContext<AppUser>
              .HasForeignKey(de => de.AgentId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(de => de.DeviceCategory).WithMany(c => c.DeviceEvents)
              .HasForeignKey(de => de.CategoryId).IsRequired(false).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<AuditLogEntity>(e =>
+        {
+            e.ToTable("audit_logs");
+            e.HasKey(a => a.Id);
+            e.HasIndex(a => a.Timestamp);
+            e.HasIndex(a => a.InstitutionId);
+            e.HasIndex(a => a.Actor);
         });
     }
 }

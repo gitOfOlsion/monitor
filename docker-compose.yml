@@ -70,7 +70,6 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ServerApiUrl:           http://server:5000
-      Auth__AdminPassword:    ${SUPER_ADMIN_PASSWORD}
       Seq__Url:               http://seq:5341
     networks: [internal]
     expose: ["5001"]

@@ -1,116 +1,229 @@
-using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PeripheralMonitor.Server.Services;
+using PeripheralMonitor.Shared.Models;
 
 namespace PeripheralMonitor.Server.Controllers;
 
-// Internal API — only accessible within Docker network (Caddy doesn't expose /api/* directly to agents).
-// Web tier handles user authentication via cookies; these endpoints serve the Web's ServerApiClient.
+// Internal API — only reachable inside the Docker network (Caddy never exposes /api/* to the public).
+// The Web tier authenticates the user via cookie, then forwards identity on every call via headers:
+//   X-Actor          = username
+//   X-Actor-Role     = SuperAdmin | InstitutionAdmin | Viewer
+//   X-Institution-Id = the caller's institution (empty for SuperAdmin)
 
-static class Caller
+public readonly record struct CallerCtx(string Actor, string Role, Guid? InstitutionId, string? Ip)
 {
-    public static Guid?   InstId(ClaimsPrincipal u) => Guid.TryParse(u.FindFirstValue("institution_id"), out var id) ? id : null;
-    public static bool    IsSuperAdmin(ClaimsPrincipal u) => u.IsInRole("SuperAdmin");
-    public static string  Name(ClaimsPrincipal u) => u.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+    public bool  IsSuperAdmin => Role == "SuperAdmin";
+    public Guid? Scope        => IsSuperAdmin ? null : InstitutionId;
 }
 
+public abstract class ScopedController : ControllerBase
+{
+    protected CallerCtx Caller()
+    {
+        var actor = Request.Headers["X-Actor"].FirstOrDefault() ?? "unknown";
+        var role  = Request.Headers["X-Actor-Role"].FirstOrDefault() ?? "Viewer";
+        Guid? inst = Guid.TryParse(Request.Headers["X-Institution-Id"].FirstOrDefault(), out var g) ? g : null;
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        return new CallerCtx(actor, role, inst, ip);
+    }
+}
+
+// ── Agents ──────────────────────────────────────────────────────────────
 [ApiController, Route("api/agents"), AllowAnonymous]
-public class AgentsController : ControllerBase
+public class AgentsController : ScopedController
 {
     private readonly AgentService _svc;
-    public AgentsController(AgentService svc) => _svc = svc;
+    private readonly AuditService _audit;
+    public AgentsController(AgentService svc, AuditService audit) { _svc = svc; _audit = audit; }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync());
+    public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
 
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id)
     {
-        var (ok, token) = await _svc.ApproveAsync(id, "Admin", null);
+        var c = Caller();
+        var (ok, token) = await _svc.ApproveAsync(id, c.Actor, c.Scope);
+        if (ok) await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.approve", id.ToString(), null, c.Ip);
         return ok ? Ok(new { token }) : NotFound();
     }
 
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> Reject(Guid id)
-        => await _svc.RejectAsync(id, null) ? Ok() : NotFound();
+    {
+        var c = Caller();
+        var ok = await _svc.RejectAsync(id, c.Scope);
+        if (ok) await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.reject", id.ToString(), null, c.Ip);
+        return ok ? Ok() : NotFound();
+    }
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)
-        => await _svc.DeleteAsync(id, null) ? Ok() : NotFound();
+    {
+        var c = Caller();
+        var ok = await _svc.DeleteAsync(id, c.Scope);
+        if (ok) await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.delete", id.ToString(), null, c.Ip);
+        return ok ? Ok() : NotFound();
+    }
 }
 
+// ── Events ────────────────────────────────────────────────────────────────
 [ApiController, Route("api/events"), AllowAnonymous]
-public class EventsController : ControllerBase
+public class EventsController : ScopedController
 {
     private readonly AgentService _svc;
     public EventsController(AgentService svc) => _svc = svc;
 
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int count = 200, [FromQuery] Guid? agentId = null)
-        => Ok(await _svc.GetEventsAsync(count, null, agentId));
+        => Ok(await _svc.GetEventsAsync(count, Caller().Scope, agentId));
 }
 
+// ── Institutions ────────────────────────────────────────────────────────────
 [ApiController, Route("api/institutions"), AllowAnonymous]
-public class InstitutionsController : ControllerBase
+public class InstitutionsController : ScopedController
 {
     private readonly AgentService _svc;
-    public InstitutionsController(AgentService svc) => _svc = svc;
+    private readonly AuditService _audit;
+    public InstitutionsController(AgentService svc, AuditService audit) { _svc = svc; _audit = audit; }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _svc.GetInstitutionsAsync());
+    public async Task<IActionResult> GetAll()
+    {
+        var c = Caller();
+        var all = await _svc.GetInstitutionsAsync();
+        if (!c.IsSuperAdmin && c.InstitutionId.HasValue)
+            all = all.Where(i => i.Id == c.InstitutionId.Value).ToList();
+        return Ok(all);
+    }
 
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateInstRequest r)
-        => Ok(await _svc.CreateInstitutionAsync(r.Name, r.Type, r.ContactEmail));
+    {
+        var c = Caller();
+        if (!c.IsSuperAdmin) return Forbid();
+        var inst = await _svc.CreateInstitutionAsync(r.Name, r.Type, r.ContactEmail);
+        await _audit.LogAsync(c.Actor, c.Role, null, "institution.create", inst.Name, null, c.Ip);
+        return Ok(inst);
+    }
 
     [HttpGet("{id:guid}/provision-token")]
     public async Task<IActionResult> ProvisionToken(Guid id, [FromQuery] Guid? templateId)
-        => Ok(new { token = await _svc.GenerateProvisionTokenAsync(id, templateId) });
+    {
+        var c = Caller();
+        if (!c.IsSuperAdmin && c.InstitutionId != id) return Forbid();
+        return Ok(new { token = await _svc.GenerateProvisionTokenAsync(id, templateId) });
+    }
 }
 public record CreateInstRequest(string Name, string Type, string ContactEmail);
 
+// ── Users ───────────────────────────────────────────────────────────────────
+[ApiController, Route("api/users"), AllowAnonymous]
+public class UsersController : ScopedController
+{
+    private readonly UserService  _users;
+    private readonly AuditService _audit;
+    public UsersController(UserService users, AuditService audit) { _users = users; _audit = audit; }
+
+    [HttpGet]
+    public async Task<IActionResult> GetAll() => Ok(await _users.GetUsersAsync(Caller().Scope));
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateUserRequest req)
+    {
+        var c = Caller();
+        if (c.Role != "SuperAdmin" && c.Role != "InstitutionAdmin") return Forbid();
+        var (ok, error) = await _users.CreateUserAsync(req, c.Role, c.InstitutionId);
+        if (!ok) return BadRequest(new { error });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "user.create", req.UserName, $"role={req.Role}", c.Ip);
+        return Ok();
+    }
+
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> Delete(string id)
+    {
+        var c = Caller();
+        if (c.Role != "SuperAdmin" && c.Role != "InstitutionAdmin") return Forbid();
+        var (ok, error) = await _users.DeleteUserAsync(id, c.Role, c.InstitutionId);
+        if (!ok) return BadRequest(new { error });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "user.delete", id, null, c.Ip);
+        return Ok();
+    }
+}
+
+// ── Auth validation (called by Web on login) ────────────────────────────────
+[ApiController, Route("api/auth"), AllowAnonymous]
+public class AuthValidationController : ScopedController
+{
+    private readonly UserService  _users;
+    private readonly AuditService _audit;
+    public AuthValidationController(UserService users, AuditService audit) { _users = users; _audit = audit; }
+
+    [HttpPost("validate")]
+    public async Task<IActionResult> Validate([FromBody] ValidateLoginRequest req)
+    {
+        var result = await _users.ValidateAsync(req.UserName, req.Password);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        if (result.Success)
+            await _audit.LogAsync(result.UserName!, result.Role!, result.InstitutionId, "auth.login", result.UserName!, null, ip);
+        else
+            await _audit.LogAsync(req.UserName, "?", null, "auth.login_failed", req.UserName, null, ip);
+        return Ok(result);
+    }
+}
+
+// ── Audit log ────────────────────────────────────────────────────────────────
+[ApiController, Route("api/audit"), AllowAnonymous]
+public class AuditController : ScopedController
+{
+    private readonly AuditService _audit;
+    public AuditController(AuditService audit) => _audit = audit;
+
+    [HttpGet]
+    public async Task<IActionResult> Get([FromQuery] int count = 500)
+        => Ok(await _audit.GetLogsAsync(count, Caller().Scope));
+
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateAuditRequest req)
+    {
+        await _audit.LogAsync(req);
+        return Ok();
+    }
+}
+
+// ── Templates ────────────────────────────────────────────────────────────────
 [ApiController, Route("api/templates"), AllowAnonymous]
-public class AgentTemplatesController : ControllerBase
+public class AgentTemplatesController : ScopedController
 {
     private readonly AgentService _svc;
     public AgentTemplatesController(AgentService svc) => _svc = svc;
 
-    [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _svc.GetTemplatesAsync());
-
-    [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateTplRequest r)
+    [HttpGet] public async Task<IActionResult> GetAll() => Ok(await _svc.GetTemplatesAsync());
+    [HttpPost] public async Task<IActionResult> Create([FromBody] CreateTplRequest r)
         => Ok(await _svc.CreateTemplateAsync(r.Name, r.Description));
 }
 public record CreateTplRequest(string Name, string Description);
 
+// ── Device categories ────────────────────────────────────────────────────────
 [ApiController, Route("api/categories"), AllowAnonymous]
-public class CategoriesController : ControllerBase
+public class CategoriesController : ScopedController
 {
     private readonly AgentService _svc;
     public CategoriesController(AgentService svc) => _svc = svc;
-
-    [HttpGet]
-    public async Task<IActionResult> GetAll() => Ok(await _svc.GetCategoriesAsync());
+    [HttpGet] public async Task<IActionResult> GetAll() => Ok(await _svc.GetCategoriesAsync());
 }
 
 // ── Agent package downloads ────────────────────────────────────────────────
 [ApiController, Route("api/download"), AllowAnonymous]
-public class DownloadController : ControllerBase
+public class DownloadController : ScopedController
 {
     private readonly AgentPackageService _packages;
     private readonly AgentService        _agents;
     private readonly IConfiguration      _config;
-
     public DownloadController(AgentPackageService packages, AgentService agents, IConfiguration config)
-    {
-        _packages = packages;
-        _agents   = agents;
-        _config   = config;
-    }
+    { _packages = packages; _agents = agents; _config = config; }
 
-    /// <summary>GET /api/download/{institutionId}/windows</summary>
     [HttpGet("{institutionId:guid}/{platform}")]
     public async Task<IActionResult> DownloadAgent(Guid institutionId, string platform)
     {
@@ -122,16 +235,14 @@ public class DownloadController : ControllerBase
         if (inst == null) return NotFound(new { error = "Institution not found" });
 
         if (!_packages.IsPackageAvailable(platform))
-            return NotFound(new { error = $"Agent package for '{platform}' is not built yet. Rebuild the server image." });
+            return NotFound(new { error = $"Agent package for '{platform}' is not built yet." });
 
         var serverUrl = _config["PublicUrl"] ?? $"{Request.Scheme}://{Request.Host}";
         var zipBytes  = _packages.BuildPackage(platform, institutionId, serverUrl);
-        var fileName  = $"peripheral-monitor-agent-{inst.Slug}-{platform}.zip";
-
-        return File(zipBytes, "application/zip", fileName);
+        return File(zipBytes, "application/zip",
+            $"peripheral-monitor-agent-{inst.Slug}-{platform}.zip");
     }
 
-    /// <summary>Check which platforms are available</summary>
     [HttpGet("platforms")]
     public IActionResult GetPlatforms() => Ok(new
     {

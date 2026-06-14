@@ -1,0 +1,76 @@
+@page "/audit"
+@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
+@inject ServerApiClient Api
+
+<PageTitle>Audit Log — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Audit Log</h1>
+    <div class="pm-filters">
+        <input class="pm-input pm-input-sm" @bind="_fActor" @bind:event="oninput" placeholder="Actor…" />
+        <select class="pm-input pm-input-sm" @bind="_fAction">
+            <option value="">All actions</option>
+            @foreach (var a in _actions) { <option value="@a">@a</option> }
+        </select>
+        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="LoadAsync">↻ Refresh</button>
+    </div>
+</div>
+
+@if (_loading)
+{ <div class="pm-loading">Loading…</div> }
+else
+{
+    <div class="pm-table-wrapper">
+        <table class="pm-table" style="table-layout:fixed;width:100%">
+            <colgroup>
+                <col style="width:17%" />
+                <col style="width:13%" />
+                <col style="width:10%" />
+                <col style="width:18%" />
+                <col style="width:25%" />
+                <col style="width:17%" />
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>Time</th><th>Actor</th><th>Role</th><th>Action</th><th>Target</th><th>Details</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var l in Filtered)
+                {
+                    <tr>
+                        <td class="pm-mono">@l.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td><strong>@l.Actor</strong></td>
+                        <td><span class="pm-badge pm-badge-@l.ActorRole.ToLower()">@l.ActorRole</span></td>
+                        <td><code>@l.Action</code></td>
+                        <td class="pm-truncate" title="@l.Target">@l.Target</td>
+                        <td class="pm-truncate" title="@l.Details">@(l.Details ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+        @if (!Filtered.Any()) { <div class="pm-empty">No audit entries match filter.</div> }
+    </div>
+    <div class="pm-table-footer">Showing @Filtered.Count() of @_logs.Count entries</div>
+}
+
+@code {
+    private List<AuditLogDto> _logs = [];
+    private List<string> _actions = [];
+    private bool _loading = true;
+    private string _fActor = "", _fAction = "";
+
+    private IEnumerable<AuditLogDto> Filtered => _logs.Where(l =>
+        (string.IsNullOrEmpty(_fActor)  || l.Actor.Contains(_fActor, StringComparison.OrdinalIgnoreCase)) &&
+        (string.IsNullOrEmpty(_fAction) || l.Action == _fAction));
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _logs    = await Api.GetAuditLogsAsync(500) ?? [];
+        _actions = _logs.Select(l => l.Action).Distinct().OrderBy(a => a).ToList();
+        _loading = false;
+    }
+}

@@ -1,8 +1,10 @@
 @page "/events"
 @attribute [Authorize]
 @implements IAsyncDisposable
+@using System.Security.Claims
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Device Events</PageTitle>
 
@@ -23,23 +25,15 @@
 </div>
 
 <div class="pm-table-wrapper">
-    <table class="pm-table" style="table-layout:fixed;width:100%">
-        <colgroup>
-            <col style="width:16%" />
-            <col style="width:14%" />
-            <col style="width:12%" />
-            <col style="width:32%" />
-            <col style="width:14%" />
-            <col style="width:12%" />
-        </colgroup>
+    <table class="pm-table pm-table-fixed">
         <thead>
             <tr>
-                <th>Time</th>
-                <th>Machine</th>
-                <th>Event</th>
+                <th style="width:180px">Time</th>
+                <th style="width:150px">Machine</th>
+                <th style="width:130px">Event</th>
                 <th>Device</th>
-                <th>Category</th>
-                <th>Status</th>
+                <th style="width:120px">Category</th>
+                <th style="width:60px">Status</th>
             </tr>
         </thead>
         <tbody>
@@ -49,7 +43,7 @@
                     <td class="pm-mono">@e.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
                     <td>@e.MachineName</td>
                     <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
-                    <td class="pm-truncate">@e.FriendlyName</td>
+                    <td>@e.FriendlyName</td>
                     <td>@e.Category</td>
                     <td>@e.Status</td>
                 </tr>
@@ -77,7 +71,11 @@
             e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
             e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
         _cats = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
-        await Realtime.EnsureConnectedAsync();
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
+        var inst = auth.User.FindFirst("institution_id")?.Value;
+        await Realtime.EnsureConnectedAsync(role, inst);
         Realtime.OnDeviceChanged += OnLive;
     }
 

@@ -1,0 +1,150 @@
+@page "/users"
+@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
+@inject ServerApiClient Api
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Users — Peripheral Monitor</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Users</h1>
+    <button class="pm-btn pm-btn-primary" @onclick="() => _showCreate = true">+ New User</button>
+</div>
+
+@if (_showCreate)
+{
+    <div class="pm-modal-overlay" @onclick="() => _showCreate = false">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>New User</h2>
+
+            @if (_error != null)
+            { <div class="pm-alert pm-alert-error">@_error</div> }
+
+            <div class="pm-field"><label>Username</label>
+                <input class="pm-input" @bind="_uName" placeholder="jdoe" /></div>
+            <div class="pm-field"><label>Email</label>
+                <input class="pm-input" @bind="_uEmail" type="email" placeholder="jdoe@institution.edu" /></div>
+            <div class="pm-field"><label>Password</label>
+                <input class="pm-input" @bind="_uPass" type="password" placeholder="min 8 chars, 1 digit" /></div>
+            <div class="pm-field"><label>Role</label>
+                <select class="pm-input" @bind="_uRole">
+                    <option value="Viewer">Viewer (read-only)</option>
+                    <option value="InstitutionAdmin">Institution Admin</option>
+                </select>
+            </div>
+
+            @if (_isSuperAdmin)
+            {
+                <div class="pm-field"><label>Institution</label>
+                    <select class="pm-input" @bind="_uInstitution">
+                        <option value="">-- select --</option>
+                        @foreach (var i in _institutions)
+                        { <option value="@i.Id">@i.Name</option> }
+                    </select>
+                </div>
+            }
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="() => _showCreate = false">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="CreateAsync"
+                        disabled="@(!CanCreate)">Create</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_loading)
+{ <div class="pm-loading">Loading…</div> }
+else
+{
+    @foreach (var group in _users.GroupBy(u => u.InstitutionName ?? "System / No Institution").OrderBy(g => g.Key))
+    {
+        <h3 class="pm-group-header">@group.Key</h3>
+        <div class="pm-table-wrapper" style="margin-bottom:1.5rem">
+            <table class="pm-table">
+                <thead><tr>
+                    <th>Username</th><th>Email</th><th>Role</th><th>Created</th><th>Actions</th>
+                </tr></thead>
+                <tbody>
+                    @foreach (var u in group)
+                    {
+                        <tr>
+                            <td><strong>@u.UserName</strong></td>
+                            <td>@u.Email</td>
+                            <td><span class="pm-badge pm-badge-@u.Role.ToLower()">@u.Role</span></td>
+                            <td>@u.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                            <td class="pm-actions">
+                                @if (u.Role != "SuperAdmin")
+                                {
+                                    <button class="pm-btn pm-btn-danger pm-btn-sm"
+                                            @onclick="() => DeleteAsync(u.Id)">🗑 Delete</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    @if (!_users.Any()) { <div class="pm-empty">No users yet.</div> }
+}
+
+@if (_message != null)
+{ <div class="pm-toast @(_msgError ? "pm-toast-error" : "pm-toast-success")">@_message</div> }
+
+@code {
+    private List<UserDto>        _users        = [];
+    private List<InstitutionDto> _institutions = [];
+    private bool   _loading = true, _showCreate, _isSuperAdmin, _msgError;
+    private string _uName = "", _uEmail = "", _uPass = "", _uRole = "Viewer", _uInstitution = "";
+    private string? _error, _message;
+
+    private bool CanCreate =>
+        !string.IsNullOrWhiteSpace(_uName) &&
+        !string.IsNullOrWhiteSpace(_uPass) &&
+        (!_isSuperAdmin || !string.IsNullOrEmpty(_uInstitution));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
+        if (_isSuperAdmin)
+            _institutions = await Api.GetInstitutionsAsync() ?? [];
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _users   = await Api.GetUsersAsync() ?? [];
+        _loading = false;
+    }
+
+    private async Task CreateAsync()
+    {
+        _error = null;
+        Guid? inst = Guid.TryParse(_uInstitution, out var g) ? g : null;
+        var req = new CreateUserRequest(_uName, _uEmail, _uPass, _uRole, inst);
+        var (ok, error) = await Api.CreateUserAsync(req);
+        if (ok)
+        {
+            _showCreate = false;
+            _uName = _uEmail = _uPass = ""; _uRole = "Viewer"; _uInstitution = "";
+            Toast("User created.", false);
+            await LoadAsync();
+        }
+        else { _error = error; }
+    }
+
+    private async Task DeleteAsync(string id)
+    {
+        var (ok, error) = await Api.DeleteUserAsync(id);
+        Toast(ok ? "User deleted." : (error ?? "Failed."), !ok);
+        if (ok) await LoadAsync();
+    }
+
+    private void Toast(string msg, bool err)
+    {
+        _message = msg; _msgError = err;
+        _ = Task.Delay(4000).ContinueWith(_ => { _message = null; InvokeAsync(StateHasChanged); });
+    }
+}
