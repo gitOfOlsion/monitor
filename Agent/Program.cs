@@ -35,6 +35,9 @@ try
         .ConfigureServices((_, svc) =>
         {
             svc.AddSingleton<DiscoveryService>();
+            svc.AddSingleton<CommandExecutor>();
+            svc.AddSingleton<FileShareService>();
+            svc.AddSingleton<RustDeskService>();
 #if PLATFORM_WINDOWS
             svc.AddSingleton<IDeviceMonitor>(sp =>
                 new WindowsDeviceMonitor(sp.GetRequiredService<ILogger<WindowsDeviceMonitor>>()));

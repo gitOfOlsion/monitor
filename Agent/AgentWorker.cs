@@ -11,6 +11,9 @@ public class AgentWorker : BackgroundService
     private HubConnection?   _hub;
     private readonly IDeviceMonitor   _monitor;
     private readonly DiscoveryService _discovery;
+    private readonly CommandExecutor  _commands;
+    private readonly FileShareService _files;
+    private readonly RustDeskService  _rustdesk;
     private readonly IConfiguration   _config;
     private readonly ILogger<AgentWorker> _log;
 
@@ -19,8 +22,8 @@ public class AgentWorker : BackgroundService
     private readonly AgentPlatform _platform    = OperatingSystem.IsWindows() ? AgentPlatform.Windows : AgentPlatform.Linux;
     private Guid _institutionId = Guid.Empty;
 
-    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, ILogger<AgentWorker> l)
-    { _config = c; _monitor = m; _discovery = d; _log = l; }
+    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, RustDeskService rustdesk, ILogger<AgentWorker> l)
+    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _rustdesk = rustdesk; _log = l; }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -61,9 +64,10 @@ public class AgentWorker : BackgroundService
                 if (_hub?.State == HubConnectionState.Connected)
                 {
                     var snap = await _monitor.GetSnapshotAsync();
+                    var rustDeskId = _rustdesk.GetId();
                     await _hub.SendAsync("AgentHeartbeat",
-                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count), ct);
-                    _log.LogDebug("Heartbeat — {N} devices", snap.Count);
+                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count, rustDeskId), ct);
+                    _log.LogDebug("Heartbeat — {N} devices, RustDesk={Rd}", snap.Count, rustDeskId ?? "none");
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)
                     try { await _hub.StartAsync(ct); } catch { }
@@ -139,6 +143,37 @@ public class AgentWorker : BackgroundService
             .Build();
         _hub.Closed      += ex => { _log.LogWarning("Hub closed: {M}", ex?.Message); return Task.CompletedTask; };
         _hub.Reconnected += id => { _log.LogInformation("Hub reconnected: {Id}", id); return Task.CompletedTask; };
+
+        _hub.On<AgentCommandPayload>("ExecuteCommand", async cmd =>
+        {
+            _log.LogWarning("Received command {Id}: {Type} (delay={Delay}s)", cmd.CommandId, cmd.Type, cmd.DelaySeconds);
+            var result = await _commands.ExecuteAsync(cmd);
+            try { await _hub!.SendAsync("CommandResult", result); }
+            catch (Exception ex) { _log.LogWarning(ex, "Failed to send command result"); }
+        });
+
+        _hub.On<FilePushRequest>("PushFile", async req =>
+        {
+            _log.LogInformation("Receiving pushed file: {Name}", req.FileName);
+            var result = await _files.SaveFileAsync(req);
+            try { await _hub!.SendAsync("CommandResult", result); }
+            catch (Exception ex) { _log.LogWarning(ex, "Failed to send push result"); }
+        });
+
+        _hub.On<FilePullRequest>("PullFile", async req =>
+        {
+            _log.LogInformation("Sending requested file: {Name}", req.FileName);
+            var result = await _files.ReadFileAsync(req);
+            try { await _hub!.SendAsync("FilePullResult", result); }
+            catch (Exception ex) { _log.LogWarning(ex, "Failed to send pull result"); }
+        });
+
+        _hub.On<string>("ListSharedFolder", async commandId =>
+        {
+            var listing = _files.ListFiles(commandId);
+            try { await _hub!.SendAsync("SharedFolderListing", listing); }
+            catch (Exception ex) { _log.LogWarning(ex, "Failed to send folder listing"); }
+        });
     }
 
     private async Task ConnectAsync(CancellationToken ct)

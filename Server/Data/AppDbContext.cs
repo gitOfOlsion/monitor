@@ -58,6 +58,7 @@ public class AgentEntity
     public DateTime? LastHeartbeat { get; set; }
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
+    public string?   RustDeskId    { get; set; }
 
     public InstitutionEntity    Institution { get; set; } = null!;
     public AgentTemplateEntity? Template    { get; set; }

@@ -19,7 +19,8 @@ public record HeartbeatPayload(
     Guid          InstitutionId,
     string        Platform,       // "Windows" or "Linux"
     DateTime      Timestamp,
-    int           DeviceCount
+    int           DeviceCount,
+    string?       RustDeskId = null // null/empty if RustDesk not installed or ID not yet generated
 );
 
 public record DeviceChangedPayload(
@@ -38,6 +39,58 @@ public record DeviceInfo(
     string FriendlyName,
     string Category,
     string Status
+);
+
+// ── Remote commands (Server -> Agent via SignalR) ───────────────────────────
+public enum AgentCommandType { Restart, Shutdown, CancelShutdown }
+
+public record AgentCommandPayload(
+    string         CommandId,   // unique id for correlating the result
+    AgentCommandType Type,
+    int?           DelaySeconds // for restart/shutdown: grace period before action
+);
+
+public record AgentCommandResult(
+    string  CommandId,
+    bool    Success,
+    string? Message
+);
+
+// ── File push/pull (Server <-> Agent via SignalR) ───────────────────────────
+// All transfers are scoped to a fixed "shared" folder on the agent —
+// never arbitrary paths. See CommandExecutor/FileShareService on the agent.
+
+public record FilePushRequest(
+    string CommandId,
+    string FileName,     // name only — no path separators allowed
+    string Base64Content // up to 50MB
+);
+
+public record FilePullRequest(
+    string CommandId,
+    string FileName       // name only — must exist in the shared folder
+);
+
+public record FilePullResult(
+    string  CommandId,
+    bool    Success,
+    string? Message,
+    string? FileName,
+    string? Base64Content
+);
+
+public record SharedFileInfo(
+    string   Name,
+    long     SizeBytes,
+    DateTime ModifiedAt
+);
+
+public record SharedFolderListing(
+    string             CommandId,
+    bool               Success,
+    string?            Message,
+    string?            FolderPath,
+    List<SharedFileInfo>? Files
 );
 
 // ── API Response DTOs ─────────────────────────────────────────────────────
@@ -71,6 +124,7 @@ public class AgentDto
     public DateTime? LastHeartbeat  { get; set; }
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
+    public string?   RustDeskId    { get; set; }
     // Nested institution info (populated when Server includes it)
     public InstitutionDto? Institution { get; set; }
 }
@@ -160,3 +214,11 @@ public record CreateAuditRequest(
     string? Details,
     string? IpAddress
 );
+
+// ── File share DTOs (API response shapes) ──────────────────────────────────
+public class SharedFileDto
+{
+    public string   Name       { get; set; } = "";
+    public long     SizeBytes  { get; set; }
+    public DateTime ModifiedAt { get; set; }
+}

@@ -1,4 +1,4 @@
-#version: "3.9"
+version: "3.9"
 
 # ── Single version variable — matches Directory.Build.props DotNetVersion ──
 x-dotnet-version: &dotnet-version "10.0"
@@ -52,6 +52,8 @@ services:
       Jwt__Secret:                      ${JWT_SECRET}
       SuperAdminPassword:               ${SUPER_ADMIN_PASSWORD}
       PublicUrl:                        ${PUBLIC_URL:-http://localhost}
+      RustDesk__ServerAddr:             ${PUBLIC_IP:-127.0.0.1}
+      RustDesk__Password:               ${RUSTDESK_PASSWORD}
       Seq__Url:                         http://seq:5341
     networks: [internal]
     expose: ["5000"]
@@ -88,11 +90,41 @@ services:
       - caddy_config:/config
     networks: [internal]
 
+  # ── RustDesk self-hosted relay (remote desktop) ─────────────────────────
+  # hbbs = ID/rendezvous server. hbbr = relay server for NAT traversal.
+  # Agents + admin RustDesk clients connect to these via the VPS public IP.
+  hbbs:
+    image: rustdesk/rustdesk-server:latest
+    container_name: pm_hbbs
+    restart: unless-stopped
+    command: hbbs -r ${PUBLIC_IP:-127.0.0.1}:21117
+    ports:
+      - "21115:21115"     # NAT type test
+      - "21116:21116"     # ID server (TCP)
+      - "21116:21116/udp" # ID server (UDP, hole punching)
+      - "21118:21118"     # ID server websocket
+    volumes:
+      - rustdesk_data:/root
+    networks: [internal]
+
+  hbbr:
+    image: rustdesk/rustdesk-server:latest
+    container_name: pm_hbbr
+    restart: unless-stopped
+    command: hbbr
+    ports:
+      - "21117:21117"     # Relay (TCP)
+      - "21119:21119"     # Relay websocket
+    volumes:
+      - rustdesk_data:/root
+    networks: [internal]
+
 volumes:
   pg_data:
   seq_data:
   caddy_data:
   caddy_config:
+  rustdesk_data:
 
 networks:
   internal:

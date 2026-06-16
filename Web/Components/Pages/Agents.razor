@@ -1,6 +1,10 @@
 @page "/agents"
 @attribute [Authorize]
+@using System.Security.Claims
 @inject ServerApiClient Api
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>Agents</PageTitle>
 
@@ -8,6 +12,26 @@
     <h1>Agents</h1>
     <button class="pm-btn pm-btn-secondary" @onclick="LoadAsync">↻ Refresh</button>
 </div>
+
+@if (_canCommand && _showRustDeskBanner)
+{
+    <div class="pm-alert pm-alert-info">
+        <strong>🖥️ First time using Remote Desktop?</strong>
+        Your own RustDesk client needs to be pointed at this server once, otherwise
+        "Remote Desktop" links will silently fail to connect (they'll try the public
+        RustDesk network or whatever relay you used before instead of this deployment).
+        <div style="margin-top:.5rem">
+            <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/windows">⬇ Windows setup script</a>
+            <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/linux">⬇ Linux setup script</a>
+            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => _showRustDeskBanner = false">Dismiss</button>
+        </div>
+        <p style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">
+            Run once as Administrator/root: <code>configure-admin-rustdesk.ps1 -ServerAddr @ServerHost</code> (Windows)
+            or <code>sudo bash configure-admin-rustdesk.sh @ServerHost</code> (Linux). This only configures
+            your own client — it does not touch any agent machine.
+        </p>
+    </div>
+}
 
 @if (_loading)
 { <div class="pm-loading">Loading…</div> }
@@ -43,7 +67,20 @@ else
                                     <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => RejectAsync(a.Id)">✗ Reject</button>
                                 }
                                 @if (a.Status == "Approved")
-                                { <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">↻ Re-issue</button> }
+                                {
+                                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">↻ Re-issue</button>
+                                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => OpenFiles(a)" title="Shared files">📁 Files</button>
+                                    @if (_canCommand)
+                                    {
+                                        @if (!string.IsNullOrEmpty(a.RustDeskId))
+                                        {
+                                            <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via RustDesk">🖥️ Remote Desktop</button>
+                                        }
+                                        <button class="pm-btn pm-btn-warning pm-btn-sm" @onclick="@(() => OpenCommand(a, "Restart"))" title="Restart machine">🔄 Restart</button>
+                                        <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="@(() => OpenCommand(a, "Shutdown"))" title="Shutdown machine">⏻ Shutdown</button>
+                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel pending shutdown/restart">🛑 Cancel</button>
+                                    }
+                                }
                                 @if (a.Status != "Approved")
                                 { <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => DeleteAsync(a.Id)">🗑 Delete</button> }
                             </td>
@@ -57,15 +94,345 @@ else
     @if (!_agents.Any()) { <div class="pm-empty">No agents discovered yet.</div> }
 }
 
+@if (_message != null)
+{ <div class="pm-toast @(_msgError ? "pm-toast-error" : "pm-toast-success")">@_message</div> }
+
+@if (_cmdAgent != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseCommand">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>@CommandTitle(_cmdType) — @_cmdAgent.MachineName</h2>
+
+            @if (_cmdType == "Shutdown" || _cmdType == "Restart")
+            {
+                <p class="pm-modal-hint">
+                    This will @(_cmdType == "Restart" ? "restart" : "shut down") <strong>@_cmdAgent.MachineName</strong>
+                    after the delay below. Users will see a system notification.
+                </p>
+                <div class="pm-field">
+                    <label>Delay before action</label>
+                    <select class="pm-input" @bind="_cmdDelay">
+                        <option value="0">Immediately</option>
+                        <option value="30">30 seconds</option>
+                        <option value="60">1 minute</option>
+                        <option value="300">5 minutes</option>
+                        <option value="600">10 minutes</option>
+                    </select>
+                </div>
+            }
+            else if (_cmdType == "CancelShutdown")
+            {
+                <p class="pm-modal-hint">
+                    This will cancel any pending shutdown or restart on <strong>@_cmdAgent.MachineName</strong>.
+                    If nothing is pending, this has no effect.
+                </p>
+            }
+
+            @if (_cmdResult != null)
+            {
+                <div class="pm-alert @(_cmdResultOk ? "pm-alert-success" : "pm-alert-error")" style="margin-top:.75rem">
+                    @_cmdResult
+                </div>
+            }
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseCommand" disabled="@_cmdSending">
+                    @(_cmdResult != null ? "Close" : "Cancel")
+                </button>
+                @if (_cmdResult == null)
+                {
+                    <button class="pm-btn @(_cmdType switch { "Shutdown" => "pm-btn-danger", "CancelShutdown" => "pm-btn-secondary", _ => "pm-btn-warning" })"
+                            @onclick="ConfirmCommand" disabled="@_cmdSending">
+                        @(_cmdSending ? "Sending…" : $"Confirm {(_cmdType == "CancelShutdown" ? "Cancel" : _cmdType)}")
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (_rdAgent != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseRd">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>🖥️ Remote Desktop — @_rdAgent.MachineName</h2>
+            <p class="pm-modal-hint">
+                "Try to connect" only works if your local RustDesk client is configured
+                for this server's relay (see the banner above). If nothing opens, use the
+                ID and password below manually in your RustDesk client — including the
+                isolated copy created by the admin setup script, if your main RustDesk
+                install is configured for a different relay.
+            </p>
+
+            <div class="pm-field">
+                <label>RustDesk ID</label>
+                <input class="pm-input pm-mono" readonly value="@_rdId" />
+            </div>
+            <div class="pm-field">
+                <label>Password</label>
+                <input class="pm-input pm-mono" readonly value="@_rdPassword" />
+            </div>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseRd">Close</button>
+                <button class="pm-btn pm-btn-primary" @onclick="TryAutoConnect">🚀 Try to connect</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_filesAgent != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseFiles">
+        <div class="pm-modal pm-modal-wide" @onclick:stopPropagation>
+            <h2>📁 Shared Files — @_filesAgent.MachineName</h2>
+            <p class="pm-modal-hint">
+                Files placed here appear in
+                <strong>@(_filesFolderPath ?? (_filesAgent.Platform == "Windows" ? "Public Documents\\PeripheralMonitorShared" : "~/PeripheralMonitorShared"))</strong>
+                on the target machine. Max 50&nbsp;MB per file.
+            </p>
+
+            @if (_canCommand)
+            {
+                <div class="pm-field">
+                    <label>Upload a file to this machine</label>
+                    <InputFile OnChange="OnFileSelected" disabled="@_filesUploading" />
+                    @if (_filesUploading)
+                    { <span class="pm-hint">Uploading…</span> }
+                </div>
+            }
+
+            @if (_filesMessage != null)
+            {
+                <div class="pm-alert @(_filesMessageOk ? "pm-alert-success" : "pm-alert-error")">@_filesMessage</div>
+            }
+
+            <div class="pm-table-wrapper" style="margin-top:.75rem">
+                @if (_filesLoading)
+                { <div class="pm-loading">Loading…</div> }
+                else
+                {
+                    <table class="pm-table">
+                        <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
+                        <tbody>
+                            @foreach (var f in _filesList)
+                            {
+                                <tr>
+                                    <td>@f.Name</td>
+                                    <td>@FormatSize(f.SizeBytes)</td>
+                                    <td>@f.ModifiedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    <td class="pm-actions">
+                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => DownloadFileAsync(f.Name)" disabled="@_filesDownloading">
+                                            ⬇ Download
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    @if (!_filesList.Any())
+                    { <div class="pm-empty">No files in the shared folder yet.</div> }
+                }
+            </div>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="() => LoadFilesAsync(_filesAgent)">↻ Refresh</button>
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseFiles">Close</button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<AgentDto> _agents = [];
     private bool _loading = true;
+    private bool _canCommand;
+    private bool _showRustDeskBanner = true;
+    private string ServerHost => new Uri(Nav.BaseUri).Host;
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    // Remote desktop modal state
+    private AgentDto? _rdAgent;
+    private string? _rdId, _rdPassword, _rdUri;
+
+    // Command modal state
+    private AgentDto? _cmdAgent;
+    private string _cmdType = "Restart";
+    private int _cmdDelay = 60;
+    private bool _cmdSending;
+    private string? _cmdResult;
+    private bool _cmdResultOk;
+
+    private string? _message;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
+        _canCommand = role is "SuperAdmin" or "InstitutionAdmin";
+        await LoadAsync();
+    }
 
     private async Task LoadAsync() { _loading = true; _agents = await Api.GetAgentsAsync() ?? []; _loading = false; }
     private async Task ApproveAsync(Guid id) { await Api.ApproveAsync(id); await LoadAsync(); }
     private async Task RejectAsync(Guid id)  { await Api.RejectAsync(id);  await LoadAsync(); }
     private async Task DeleteAsync(Guid id)  { await Api.DeleteAsync(id);  await LoadAsync(); }
     private static string Icon(string p) => p switch { "Windows" => "🪟", "Linux" => "🐧", _ => "🖥️" };
+
+    private async Task ConnectRemoteDesktop(AgentDto agent)
+    {
+        var (ok, rustDeskId, password, uri, err) = await Api.GetRemoteDesktopLinkAsync(agent.Id);
+        if (!ok)
+        {
+            Toast(err ?? "Remote desktop unavailable for this machine.", true);
+            return;
+        }
+        _rdAgent = agent; _rdId = rustDeskId; _rdPassword = password; _rdUri = uri;
+    }
+
+    private async Task TryAutoConnect()
+    {
+        if (_rdUri != null) await JS.InvokeVoidAsync("pmOpenExternalLink", _rdUri);
+    }
+
+    private void CloseRd() { _rdAgent = null; _rdId = null; _rdPassword = null; _rdUri = null; }
+
+    private void OpenCommand(AgentDto agent, string type)
+    {
+        _cmdAgent = agent; _cmdType = type; _cmdDelay = 60;
+        _cmdResult = null; _cmdSending = false;
+    }
+
+    private void CloseCommand()
+    {
+        _cmdAgent = null; _cmdResult = null;
+    }
+
+    private async Task ConfirmCommand()
+    {
+        if (_cmdAgent == null) return;
+        _cmdSending = true;
+        var (ok, msg) = await Api.SendCommandAsync(_cmdAgent.Id, _cmdType, _cmdDelay);
+        _cmdSending = false;
+        _cmdResultOk = ok;
+        var label = FriendlyLabel(_cmdType);
+        _cmdResult = ok
+            ? (msg ?? $"{label} command sent successfully.")
+            : (msg ?? "Command failed.");
+
+        if (ok) Toast($"{label} sent to {_cmdAgent.MachineName}.", false);
+        else    Toast($"{label} failed: {_cmdResult}", true);
+    }
+
+    private static string FriendlyLabel(string type) => type switch
+    {
+        "CancelShutdown" => "Cancel shutdown/restart",
+        _ => type
+    };
+
+    private static string CommandTitle(string type) => type switch
+    {
+        "Restart"        => "🔄 Restart Machine",
+        "Shutdown"       => "⏻ Shutdown Machine",
+        "CancelShutdown" => "🛑 Cancel Shutdown/Restart",
+        _ => type
+    };
+
+    private void Toast(string msg, bool err)
+    {
+        _message = msg; _msgError = err;
+        _ = Task.Delay(4000).ContinueWith(_ => { _message = null; InvokeAsync(StateHasChanged); });
+    }
+
+    // ── Files modal ──────────────────────────────────────────────────────
+    private AgentDto? _filesAgent;
+    private string? _filesFolderPath;
+    private List<SharedFileDto> _filesList = [];
+    private bool _filesLoading, _filesUploading, _filesDownloading;
+    private string? _filesMessage;
+    private bool _filesMessageOk;
+
+    private const long MaxUploadBytes = 50 * 1024 * 1024;
+
+    private async Task OpenFiles(AgentDto agent)
+    {
+        _filesAgent = agent;
+        _filesMessage = null;
+        await LoadFilesAsync(agent);
+    }
+
+    private void CloseFiles()
+    {
+        _filesAgent = null; _filesList = []; _filesMessage = null;
+    }
+
+    private async Task LoadFilesAsync(AgentDto? agent)
+    {
+        if (agent == null) return;
+        _filesLoading = true;
+        var (ok, folder, files, err) = await Api.ListSharedFilesAsync(agent.Id);
+        _filesLoading = false;
+        if (ok) { _filesFolderPath = folder; _filesList = files; }
+        else { _filesMessage = err; _filesMessageOk = false; }
+    }
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        if (_filesAgent == null) return;
+        var file = e.File;
+        if (file == null) return;
+
+        if (file.Size > MaxUploadBytes)
+        {
+            _filesMessage = $"File exceeds 50MB limit ({FormatSize(file.Size)})";
+            _filesMessageOk = false;
+            return;
+        }
+
+        _filesUploading = true;
+        _filesMessage = null;
+        try
+        {
+            using var stream = file.OpenReadStream(MaxUploadBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+
+            var (ok, msg) = await Api.PushFileAsync(_filesAgent.Id, file.Name, ms.ToArray());
+            _filesMessageOk = ok;
+            _filesMessage = msg ?? (ok ? "File uploaded." : "Upload failed.");
+            if (ok) await LoadFilesAsync(_filesAgent);
+        }
+        catch (Exception ex)
+        {
+            _filesMessageOk = false;
+            _filesMessage = $"Upload failed: {ex.Message}";
+        }
+        finally { _filesUploading = false; }
+    }
+
+    private async Task DownloadFileAsync(string fileName)
+    {
+        if (_filesAgent == null) return;
+        _filesDownloading = true;
+        var (bytes, err) = await Api.PullFileAsync(_filesAgent.Id, fileName);
+        _filesDownloading = false;
+
+        if (bytes == null)
+        {
+            _filesMessage = err ?? "Download failed.";
+            _filesMessageOk = false;
+            return;
+        }
+
+        var base64 = Convert.ToBase64String(bytes);
+        var mime   = "application/octet-stream";
+        await JS.InvokeVoidAsync("pmDownloadFile", fileName, mime, base64);
+    }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes / (1024.0 * 1024):F1} MB"
+    };
 }

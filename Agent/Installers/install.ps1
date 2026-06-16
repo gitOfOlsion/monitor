@@ -225,7 +225,116 @@ Write-Ok "Service '$ServiceName' registered"
 Write-Ok "Recovery policy: auto-restart on failure (5s, 10s, 30s)"
 
 # ======================================================================
-# STEP 6: Start the service
+# STEP 6: Install and configure RustDesk (remote desktop)
+# ======================================================================
+# Checklist (same pattern as the .NET runtime check above):
+#   1. Is RustDesk installed at all?            -> if not, download + silent-install
+#   2. Is the installed version recent enough?  -> if not, upgrade (reinstall over it)
+#   3. Is it already pointed at OUR server?      -> if not, reconfigure host + password
+#      (always re-apply config even if already installed, in case it was
+#       previously configured for a different relay/server)
+# ======================================================================
+
+Write-Step "Checking RustDesk (remote desktop)..."
+
+$RustDeskMinVersion = [version]"1.2.0"
+
+try {
+    $rdConfig = Join-Path $InstallPath 'appsettings.local.json'
+    $rdServerAddr = ''
+    $rdPassword   = ''
+    if (Test-Path $rdConfig) {
+        $cfg = Get-Content $rdConfig -Raw | ConvertFrom-Json
+        if ($cfg.RustDesk) {
+            $rdServerAddr = $cfg.RustDesk.ServerAddr
+            $rdPassword   = $cfg.RustDesk.Password
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($rdServerAddr)) {
+        Write-Warn "No RustDesk server configured in appsettings.local.json — skipping remote desktop setup"
+    } else {
+        $rdExePath = "${env:ProgramFiles}\RustDesk\rustdesk.exe"
+        $rdInstalled = $false
+        $rdNeedsUpgrade = $false
+
+        if (Test-Path $rdExePath) {
+            $rdInstalled = $true
+            try {
+                $verInfo = (Get-Item $rdExePath).VersionInfo
+                $installedVersion = [version]"$($verInfo.FileMajorPart).$($verInfo.FileMinorPart).$($verInfo.FileBuildPart)"
+                if ($installedVersion -lt $RustDeskMinVersion) {
+                    Write-Warn "RustDesk $installedVersion is older than required $RustDeskMinVersion - will upgrade"
+                    $rdNeedsUpgrade = $true
+                } else {
+                    Write-Ok "RustDesk $installedVersion already installed (meets minimum $RustDeskMinVersion)"
+                }
+            } catch {
+                Write-Warn "Could not determine installed RustDesk version - will reinstall to be safe"
+                $rdNeedsUpgrade = $true
+            }
+        } else {
+            Write-Warn "RustDesk not found - will install"
+        }
+
+        if (-not $rdInstalled -or $rdNeedsUpgrade) {
+            # Use the lightweight "nogui"-equivalent build is not available upstream for Windows,
+            # so we use the standard installer but with --silent-install (no UI, no Start Menu prompts).
+            $rdInstaller = Join-Path $env:TEMP 'rustdesk-installer.exe'
+            $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64.exe'
+
+            Write-Host "    Downloading RustDesk..." -ForegroundColor Gray
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $rdUrl -OutFile $rdInstaller -UseBasicParsing
+
+            Write-Host "    Installing RustDesk silently..." -ForegroundColor Gray
+            Start-Process -FilePath $rdInstaller -ArgumentList '--silent-install' -Wait -NoNewWindow
+            Remove-Item $rdInstaller -ErrorAction SilentlyContinue
+
+            Start-Sleep -Seconds 3
+            if (Test-Path $rdExePath) { Write-Ok "RustDesk installed/upgraded" }
+            else { Write-Warn "RustDesk installer ran but executable not found at expected path" }
+        }
+
+        # Always (re)apply server + password configuration, even if RustDesk was already
+        # installed — it may have been previously configured for a different relay.
+        if (Test-Path $rdExePath) {
+            Write-Host "    Applying server + password configuration..." -ForegroundColor Gray
+
+            $currentConfigPath = "$env:ProgramData\RustDesk\config\RustDesk2.toml"
+            $alreadyCorrect = $false
+            if (Test-Path $currentConfigPath) {
+                $existing = Get-Content $currentConfigPath -Raw -ErrorAction SilentlyContinue
+                if ($existing -and $existing -match [regex]::Escape($rdServerAddr)) {
+                    $alreadyCorrect = $true
+                }
+            }
+
+            if ($alreadyCorrect) {
+                Write-Ok "RustDesk already configured for this server ($rdServerAddr) - skipping reconfiguration"
+            } else {
+                # Configure rendezvous/relay server (key left empty - using default unencrypted handshake)
+                & $rdExePath --config "host=$rdServerAddr,key=" 2>$null
+                Start-Sleep -Seconds 1
+
+                # Set fixed permanent password
+                & $rdExePath --password $rdPassword 2>$null
+                Start-Sleep -Seconds 1
+
+                Write-Ok "RustDesk reconfigured for this server (was previously pointed elsewhere, or freshly installed)"
+            }
+
+            Write-Host "    Server: $rdServerAddr" -ForegroundColor Gray
+            Write-Host "    The agent reports this machine's RustDesk ID to the dashboard on its next heartbeat." -ForegroundColor Gray
+        }
+    }
+} catch {
+    Write-Warn "RustDesk setup failed (non-fatal): $_"
+    Write-Host "    Device monitoring will continue to work normally." -ForegroundColor Gray
+}
+
+# ======================================================================
+# STEP 7: Start the agent service
 # ======================================================================
 
 Write-Step "Starting service..."
@@ -260,6 +369,7 @@ Write-Host "  Service name:  $ServiceName"
 Write-Host "  Service user:  .\$ServiceUser"
 Write-Host "  Logs:          $InstallPath\logs\"
 Write-Host "  Config:        $InstallPath\appsettings.local.json"
+Write-Host "  Remote desktop: RustDesk configured (ID visible in dashboard after first heartbeat)"
 Write-Host ""
 Write-Host "  Manage:" -ForegroundColor Gray
 Write-Host "    Stop:    Stop-Service $ServiceName"
