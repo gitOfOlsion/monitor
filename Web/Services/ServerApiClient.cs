@@ -46,6 +46,18 @@ public class ServerApiClient
     public async Task<bool> DeleteAsync(Guid id)
     { AttachIdentity(); return (await _http.DeleteAsync($"/api/agents/{id}")).IsSuccessStatusCode; }
 
+    /// <summary>Send a remote command (Restart, Shutdown, CancelShutdown) to an online agent.</summary>
+    public async Task<(bool ok, string? message)> SendCommandAsync(Guid agentId, string type, int? delaySeconds = null)
+    {
+        AttachIdentity();
+        var r = await _http.PostAsJsonAsync($"/api/agents/{agentId}/command", new { type, delaySeconds });
+        var body = await r.Content.ReadFromJsonAsync<CommandResponse>();
+        if (r.IsSuccessStatusCode) return (body?.Success ?? false, body?.Message);
+        return (false, body?.Message ?? body?.Error ?? "Command failed");
+    }
+
+    private record CommandResponse(bool Success, string? Message, string? Error);
+
     // ── Events ────────────────────────────────────────────────────────────
     public Task<List<DeviceEventDto>?> GetEventsAsync(int count = 200, Guid? agentId = null)
     {
@@ -115,6 +127,60 @@ public class ServerApiClient
     // ── Categories ──────────────────────────────────────────────────────────
     public Task<List<DeviceCategoryDto>?> GetCategoriesAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<DeviceCategoryDto>>("/api/categories"); }
+
+    // ── File share (push/pull to agent's shared folder) ──────────────────────
+    public async Task<(bool ok, string? folderPath, List<SharedFileDto> files, string? error)> ListSharedFilesAsync(Guid agentId)
+    {
+        AttachIdentity();
+        var r = await _http.GetAsync($"/api/agents/{agentId}/files");
+        if (!r.IsSuccessStatusCode)
+        {
+            var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+            return (false, null, [], err?.Error ?? "Failed to list files");
+        }
+        var body = await r.Content.ReadFromJsonAsync<FileListResponse>();
+        return (true, body?.FolderPath, body?.Files ?? [], null);
+    }
+
+    public async Task<(bool ok, string? message)> PushFileAsync(Guid agentId, string fileName, byte[] content)
+    {
+        AttachIdentity();
+        var base64 = Convert.ToBase64String(content);
+        var r = await _http.PostAsJsonAsync($"/api/agents/{agentId}/files/push", new { fileName, base64Content = base64 });
+        var body = await r.Content.ReadFromJsonAsync<CommandResponse>();
+        if (r.IsSuccessStatusCode) return (body?.Success ?? false, body?.Message);
+        return (false, body?.Message ?? body?.Error ?? "Push failed");
+    }
+
+    /// <summary>Returns the raw bytes of a file pulled from the agent, or null on failure.</summary>
+    public async Task<(byte[]? bytes, string? error)> PullFileAsync(Guid agentId, string fileName)
+    {
+        AttachIdentity();
+        var r = await _http.GetAsync($"/api/agents/{agentId}/files/pull?fileName={Uri.EscapeDataString(fileName)}");
+        if (!r.IsSuccessStatusCode)
+        {
+            var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+            return (null, err?.Error ?? "Pull failed");
+        }
+        return (await r.Content.ReadAsByteArrayAsync(), null);
+    }
+
+    public async Task<(bool ok, string? rustDeskId, string? password, string? uri, string? error)> GetRemoteDesktopLinkAsync(Guid agentId)
+    {
+        AttachIdentity();
+        var r = await _http.GetAsync($"/api/agents/{agentId}/remote-desktop");
+        if (!r.IsSuccessStatusCode)
+        {
+            var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+            return (false, null, null, null, err?.Error ?? "Remote desktop unavailable");
+        }
+        var body = await r.Content.ReadFromJsonAsync<RemoteDesktopResponse>();
+        return (true, body?.RustDeskId, body?.Password, body?.Uri, null);
+    }
+
+    private record RemoteDesktopResponse(string RustDeskId, string Password, string Uri);
+
+    private record FileListResponse(string? FolderPath, List<SharedFileDto> Files);
 
     private record ProvisionResponse(string Token);
     private record ErrorResponse(string Error);

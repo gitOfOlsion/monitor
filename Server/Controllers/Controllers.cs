@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.SignalR;
+using PeripheralMonitor.Server.Hubs;
 using PeripheralMonitor.Server.Services;
 using PeripheralMonitor.Shared.Models;
 
@@ -35,7 +37,12 @@ public class AgentsController : ScopedController
 {
     private readonly AgentService _svc;
     private readonly AuditService _audit;
-    public AgentsController(AgentService svc, AuditService audit) { _svc = svc; _audit = audit; }
+    private readonly AgentConnectionRegistry _connections;
+    private readonly IHubContext<MonitorHub> _hub;
+    private readonly IConfiguration _config;
+
+    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, IHubContext<MonitorHub> hub, IConfiguration config)
+    { _svc = svc; _audit = audit; _connections = connections; _hub = hub; _config = config; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
@@ -66,7 +73,155 @@ public class AgentsController : ScopedController
         if (ok) await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.delete", id.ToString(), null, c.Ip);
         return ok ? Ok() : NotFound();
     }
+
+    /// <summary>
+    /// Send a remote command (restart / shutdown / cancel-shutdown) to an online agent.
+    /// Only SuperAdmin or the agent's own institution admins may issue commands.
+    /// Viewers are forbidden (read-only role).
+    /// </summary>
+    [HttpPost("{id:guid}/command")]
+    public async Task<IActionResult> SendCommand(Guid id, [FromBody] SendCommandRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        var connectionId = _connections.GetConnectionId(id);
+        if (connectionId == null)
+            return BadRequest(new { error = "Agent is offline — cannot send command" });
+
+        if (!Enum.TryParse<AgentCommandType>(req.Type, ignoreCase: true, out var cmdType))
+            return BadRequest(new { error = $"Unknown command type '{req.Type}'" });
+
+        var commandId = Guid.NewGuid().ToString("N");
+        var payload   = new AgentCommandPayload(commandId, cmdType, req.DelaySeconds);
+
+        // Fire the command at the agent, then wait briefly for an ack/result.
+        var waitTask = _connections.WaitForResult<AgentCommandResult>(commandId, TimeSpan.FromSeconds(15),
+            () => new AgentCommandResult(commandId, false, "Timed out waiting for agent response"));
+        await _hub.Clients.Client(connectionId).SendAsync("ExecuteCommand", payload);
+        var result = await waitTask;
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, $"agent.command.{cmdType.ToString().ToLowerInvariant()}",
+            agent.MachineName, result.Success ? "ok" : $"failed: {result.Message}", c.Ip);
+
+        return Ok(new { success = result.Success, message = result.Message });
+    }
+
+    /// <summary>List files in the agent's shared folder.</summary>
+    [HttpGet("{id:guid}/files")]
+    public async Task<IActionResult> ListSharedFiles(Guid id)
+    {
+        var c = Caller();
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        var connectionId = _connections.GetConnectionId(id);
+        if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
+
+        var commandId = Guid.NewGuid().ToString("N");
+        var waitTask = _connections.WaitForResult<SharedFolderListing>(commandId, TimeSpan.FromSeconds(15),
+            () => new SharedFolderListing(commandId, false, "Timed out waiting for agent response", null, null));
+        await _hub.Clients.Client(connectionId).SendAsync("ListSharedFolder", commandId);
+        var listing = await waitTask;
+
+        if (!listing.Success) return BadRequest(new { error = listing.Message });
+        return Ok(new { folderPath = listing.FolderPath, files = listing.Files ?? [] });
+    }
+
+    /// <summary>Push a file to the agent's shared folder. Max 50MB, filename only (no paths).</summary>
+    [HttpPost("{id:guid}/files/push")]
+    public async Task<IActionResult> PushFile(Guid id, [FromBody] PushFileRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        var connectionId = _connections.GetConnectionId(id);
+        if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
+
+        if (string.IsNullOrWhiteSpace(req.FileName) || req.FileName.Contains('/') || req.FileName.Contains('\\') || req.FileName.Contains(".."))
+            return BadRequest(new { error = "Invalid file name" });
+
+        var commandId = Guid.NewGuid().ToString("N");
+        var payload   = new FilePushRequest(commandId, req.FileName, req.Base64Content);
+
+        var waitTask = _connections.WaitForResult<AgentCommandResult>(commandId, TimeSpan.FromSeconds(60),
+            () => new AgentCommandResult(commandId, false, "Timed out waiting for agent response"));
+        await _hub.Clients.Client(connectionId).SendAsync("PushFile", payload);
+        var result = await waitTask;
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.file.push",
+            $"{agent.MachineName}:{req.FileName}", result.Success ? "ok" : $"failed: {result.Message}", c.Ip);
+
+        return Ok(new { success = result.Success, message = result.Message });
+    }
+
+    /// <summary>Pull a file from the agent's shared folder. Filename only (no paths), max 50MB.</summary>
+    [HttpGet("{id:guid}/files/pull")]
+    public async Task<IActionResult> PullFile(Guid id, [FromQuery] string fileName)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        var connectionId = _connections.GetConnectionId(id);
+        if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
+
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Contains('/') || fileName.Contains('\\') || fileName.Contains(".."))
+            return BadRequest(new { error = "Invalid file name" });
+
+        var commandId = Guid.NewGuid().ToString("N");
+        var payload   = new FilePullRequest(commandId, fileName);
+
+        var waitTask = _connections.WaitForResult<FilePullResult>(commandId, TimeSpan.FromSeconds(60),
+            () => new FilePullResult(commandId, false, "Timed out waiting for agent response", null, null));
+        await _hub.Clients.Client(connectionId).SendAsync("PullFile", payload);
+        var result = await waitTask;
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.file.pull",
+            $"{agent.MachineName}:{fileName}", result.Success ? "ok" : $"failed: {result.Message}", c.Ip);
+
+        if (!result.Success) return BadRequest(new { error = result.Message });
+
+        var bytes = Convert.FromBase64String(result.Base64Content!);
+        return File(bytes, "application/octet-stream", result.FileName);
+    }
+
+    /// <summary>
+    /// Returns a rustdesk:// URI for connecting to this agent's machine.
+    /// Requires RustDesk to be installed (done automatically by the agent installer)
+    /// and the agent to have reported its RustDesk ID via heartbeat.
+    /// Viewers cannot retrieve this (it includes the shared connection password).
+    /// </summary>
+    [HttpGet("{id:guid}/remote-desktop")]
+    public async Task<IActionResult> GetRemoteDesktopLink(Guid id)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        if (string.IsNullOrEmpty(agent.RustDeskId))
+            return NotFound(new { error = "RustDesk ID not available yet. The agent may still be starting RustDesk, or RustDesk could not be installed on this machine (e.g. headless server)." });
+
+        var password = _config["RustDesk:Password"] ?? "";
+        var uri = $"rustdesk://connect/{agent.RustDeskId}?password={Uri.EscapeDataString(password)}";
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, null, c.Ip);
+
+        return Ok(new { rustDeskId = agent.RustDeskId, password, uri });
+    }
 }
+public record PushFileRequest(string FileName, string Base64Content);
+public record SendCommandRequest(string Type, int? DelaySeconds);
 
 // ── Events ────────────────────────────────────────────────────────────────
 [ApiController, Route("api/events"), AllowAnonymous]
@@ -249,4 +404,25 @@ public class DownloadController : ScopedController
         windows = _packages.IsPackageAvailable("windows"),
         linux   = _packages.IsPackageAvailable("linux")
     });
+
+    /// <summary>
+    /// Download the one-time RustDesk configurator for admins. This is NOT the agent —
+    /// it just points the admin's own RustDesk client at this deployment's relay server,
+    /// so "Remote Desktop" links from the dashboard connect correctly. Run once per admin machine.
+    /// </summary>
+    [HttpGet("rustdesk-setup/{platform}")]
+    public IActionResult DownloadRustDeskSetup(string platform)
+    {
+        platform = platform.ToLowerInvariant();
+        if (platform != "windows" && platform != "linux")
+            return BadRequest(new { error = "Platform must be 'windows' or 'linux'" });
+
+        var fileName = platform == "windows" ? "configure-admin-rustdesk.ps1" : "configure-admin-rustdesk.sh";
+        var path = Path.Combine("/app/agent-packages/installers", fileName);
+        if (!System.IO.File.Exists(path))
+            return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
+
+        var bytes = System.IO.File.ReadAllBytes(path);
+        return File(bytes, "text/plain", fileName);
+    }
 }

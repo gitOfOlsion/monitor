@@ -162,6 +162,14 @@ for grp in plugdev input dialout bluetooth; do
 done
 ok "Added to device groups: plugdev, input, dialout, bluetooth"
 
+# Grant passwordless shutdown/reboot/cancel — required for remote restart/shutdown commands
+cat > /etc/sudoers.d/peripheral-monitor << SUDOERS
+# Peripheral Monitor Agent — allow remote restart/shutdown/cancel without a password
+$SERVICE_USER ALL=(root) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown
+SUDOERS
+chmod 440 /etc/sudoers.d/peripheral-monitor
+ok "Granted passwordless shutdown/reboot rights via /etc/sudoers.d/peripheral-monitor"
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 3: Install agent files
 # ══════════════════════════════════════════════════════════════════════════
@@ -274,7 +282,118 @@ systemctl daemon-reload
 ok "Systemd unit created: ${SERVICE_NAME}.service"
 
 # ══════════════════════════════════════════════════════════════════════════
-# STEP 7: Enable and start service
+# STEP 7: Install and configure RustDesk (remote desktop)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 7: Install and configure RustDesk (remote desktop)
+# ══════════════════════════════════════════════════════════════════════════
+# Checklist (same pattern as the .NET runtime check above):
+#   1. Is RustDesk installed at all?            -> if not, download + install
+#   2. Is the installed version recent enough?  -> if not, upgrade
+#   3. Is it already pointed at OUR server?      -> if not, reconfigure
+#      (always re-check config, even if already installed, in case it was
+#       previously configured for a different relay/server)
+# ══════════════════════════════════════════════════════════════════════════
+
+step "Checking RustDesk (remote desktop)..."
+
+RD_MIN_VERSION="1.2.0"
+
+RD_SERVER_ADDR=""
+RD_PASSWORD=""
+if [[ -f "$INSTALL_DIR/appsettings.local.json" ]]; then
+    RD_SERVER_ADDR=$(grep -A2 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"ServerAddr"\s*:\s*"\K[^"]*' || true)
+    RD_PASSWORD=$(grep -A2 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Password"\s*:\s*"\K[^"]*' || true)
+fi
+
+version_ge() {
+    # returns 0 (true) if $1 >= $2
+    [[ "$1" == "$2" ]] && return 0
+    [[ "$(printf '%s\n%s' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
+}
+
+if [[ -z "$RD_SERVER_ADDR" ]]; then
+    warn "No RustDesk server configured in appsettings.local.json — skipping remote desktop setup"
+elif ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d /usr/share/xsessions ]]; then
+    warn "No graphical desktop environment detected — RustDesk requires a GUI session, skipping"
+    echo "    Device monitoring will continue to work normally on this headless machine."
+else
+    RD_INSTALLED=false
+    RD_NEEDS_UPGRADE=false
+
+    if command -v rustdesk &>/dev/null; then
+        RD_INSTALLED=true
+        RD_CURRENT_VERSION=$(rustdesk --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "0.0.0")
+        if version_ge "$RD_CURRENT_VERSION" "$RD_MIN_VERSION"; then
+            ok "RustDesk $RD_CURRENT_VERSION already installed (meets minimum $RD_MIN_VERSION)"
+        else
+            warn "RustDesk $RD_CURRENT_VERSION is older than required $RD_MIN_VERSION — will upgrade"
+            RD_NEEDS_UPGRADE=true
+        fi
+    else
+        warn "RustDesk not found — will install"
+    fi
+
+    if [[ "$RD_INSTALLED" == false || "$RD_NEEDS_UPGRADE" == true ]]; then
+        echo "    Downloading RustDesk..."
+        RD_DEB="/tmp/rustdesk.deb"
+        ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+        RD_URL="https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-${ARCH}.deb"
+
+        if wget -q "$RD_URL" -O "$RD_DEB" 2>/dev/null && [[ -s "$RD_DEB" ]]; then
+            case "$PKG_MGR" in
+                apt)
+                    apt-get install -y -qq "$RD_DEB" || { dpkg -i "$RD_DEB" && apt-get install -f -y -qq; }
+                    ;;
+                *)
+                    warn "Automatic install only supported on Debian/Ubuntu (.deb). Download manually: $RD_URL"
+                    ;;
+            esac
+            rm -f "$RD_DEB"
+        else
+            warn "Could not download RustDesk from $RD_URL — skipping"
+        fi
+
+        if command -v rustdesk &>/dev/null; then ok "RustDesk installed/upgraded"; fi
+    fi
+
+    if command -v rustdesk &>/dev/null; then
+        # Always re-check config — RustDesk may have been previously installed
+        # and pointed at a different relay (public servers, or another deployment).
+        RD_CONFIG_PATH="/root/.config/rustdesk/RustDesk2.toml"
+        RD_ALREADY_CORRECT=false
+        if [[ -f "$RD_CONFIG_PATH" ]] && grep -q "$RD_SERVER_ADDR" "$RD_CONFIG_PATH" 2>/dev/null; then
+            RD_ALREADY_CORRECT=true
+        fi
+
+        if [[ "$RD_ALREADY_CORRECT" == true ]]; then
+            ok "RustDesk already configured for this server ($RD_SERVER_ADDR) — skipping reconfiguration"
+        else
+            echo "    Applying server + password configuration..."
+            rustdesk --config "host=$RD_SERVER_ADDR,key=" 2>/dev/null || true
+            rustdesk --password "$RD_PASSWORD" 2>/dev/null || true
+            ok "RustDesk reconfigured for this server (was previously pointed elsewhere, or freshly installed)"
+        fi
+
+        # Auto-start RustDesk for any desktop user via XDG autostart
+        mkdir -p /etc/xdg/autostart
+        cat > /etc/xdg/autostart/rustdesk.desktop << AUTOSTART
+[Desktop Entry]
+Type=Application
+Name=RustDesk
+Exec=rustdesk --tray
+Icon=rustdesk
+Terminal=false
+X-GNOME-Autostart-enabled=true
+AUTOSTART
+        ok "RustDesk configured (server: $RD_SERVER_ADDR), autostart enabled for desktop sessions"
+        echo "    The agent reports this machine's RustDesk ID to the dashboard on its next heartbeat."
+    fi
+fi
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 8: Enable and start service
 # ══════════════════════════════════════════════════════════════════════════
 
 step "Enabling and starting service..."
@@ -308,6 +427,7 @@ echo "  Service user:  $SERVICE_USER"
 echo "  Logs:          $INSTALL_DIR/logs/"
 echo "  Config:        $INSTALL_DIR/appsettings.local.json"
 echo "  udev rules:    /etc/udev/rules.d/99-peripheral-monitor.rules"
+echo "  Remote desktop: RustDesk configured (ID visible in dashboard after first heartbeat)"
 echo ""
 echo "  Manage:"
 echo "    Status:  systemctl status $SERVICE_NAME"

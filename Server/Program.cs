@@ -74,6 +74,7 @@ try
     builder.Services.AddCors(o => o.AddPolicy("Dev", p =>
         p.AllowAnyMethod().AllowAnyHeader().SetIsOriginAllowed(_ => true).AllowCredentials()));
     builder.Services.AddScoped<AgentService>();
+    builder.Services.AddSingleton<AgentConnectionRegistry>();
     builder.Services.AddScoped<UserService>();
     builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();

@@ -46,11 +46,17 @@ public class AgentPackageService
             fileStream.CopyTo(entryStream);
         }
 
-        // 2. Add appsettings.local.json with pre-filled token
+        // 2. Add appsettings.local.json with pre-filled token + RustDesk config
+        var rustDeskAddr = _config["RustDesk:ServerAddr"] ?? "";
+        var rustDeskPass = _config["RustDesk:Password"] ?? "";
         var settingsJson = $$"""
             {
               "SignalRUrl": "{{serverUrl}}/monitor",
-              "JwtToken": "{{token}}"
+              "JwtToken": "{{token}}",
+              "RustDesk": {
+                "ServerAddr": "{{rustDeskAddr}}",
+                "Password": "{{rustDeskPass}}"
+              }
             }
             """;
         var settingsEntry = zip.CreateEntry("appsettings.local.json", CompressionLevel.Optimal);

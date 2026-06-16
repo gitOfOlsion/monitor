@@ -81,7 +81,17 @@ public class AgentService
         db.Agents.Remove(a); await db.SaveChangesAsync(); return true;
     }
 
-    public async Task UpdateHeartbeatAsync(string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count)
+    /// <summary>Fetch an agent by ID, enforcing institution scope. Returns null if not found or out of scope.</summary>
+    public async Task<AgentEntity?> GetAgentByIdAsync(Guid agentId, Guid? callerInst)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var a = await db.Agents.FindAsync(agentId);
+        if (a == null) return null;
+        if (callerInst.HasValue && a.InstitutionId != callerInst.Value) return null;
+        return a;
+    }
+
+    public async Task<Guid> UpdateHeartbeatAsync(string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count, string? rustDeskId = null)
     {
         await using var db = await _db.CreateDbContextAsync();
         var a = await db.Agents.FirstOrDefaultAsync(x => x.MachineName == machineName && x.InstitutionId == institutionId);
@@ -90,7 +100,7 @@ public class AgentService
         if (a == null)
         {
             if (!await db.Institutions.AnyAsync(i => i.Id == institutionId))
-                return;
+                return Guid.Empty;
 
             a = new AgentEntity
             {
@@ -115,10 +125,15 @@ public class AgentService
         if (a.MacAddress == "unknown" && !string.IsNullOrEmpty(macAddress) && macAddress != "unknown")
             a.MacAddress = macAddress;
 
+        // RustDesk ID is generated once by the client on first run, then stable — only update if changed/newly known.
+        if (!string.IsNullOrEmpty(rustDeskId) && a.RustDeskId != rustDeskId)
+            a.RustDeskId = rustDeskId;
+
         a.LastHeartbeat = ts;
         a.DeviceCount   = count;
         a.Status        = "Approved";
         await db.SaveChangesAsync();
+        return a.Id;
     }
 
     public async Task RecordDeviceEventAsync(DeviceChangedPayload p)
