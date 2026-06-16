@@ -252,7 +252,7 @@ try {
     }
 
     if ([string]::IsNullOrWhiteSpace($rdServerAddr)) {
-        Write-Warn "No RustDesk server configured in appsettings.local.json — skipping remote desktop setup"
+        Write-Warn "No RustDesk server configured in appsettings.local.json - skipping remote desktop setup"
     } else {
         $rdExePath = "${env:ProgramFiles}\RustDesk\rustdesk.exe"
         $rdInstalled = $false
@@ -278,13 +278,23 @@ try {
         }
 
         if (-not $rdInstalled -or $rdNeedsUpgrade) {
-            # Use the lightweight "nogui"-equivalent build is not available upstream for Windows,
-            # so we use the standard installer but with --silent-install (no UI, no Start Menu prompts).
             $rdInstaller = Join-Path $env:TEMP 'rustdesk-installer.exe'
-            $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64.exe'
+
+            Write-Host "    Resolving latest RustDesk release..." -ForegroundColor Gray
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            try {
+                $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest' `
+                    -Headers @{ "User-Agent" = "PeripheralMonitor-Agent" } -UseBasicParsing
+                $asset = $release.assets | Where-Object { $_.name -match '^rustdesk-[\d\.]+-x86_64\.exe$' } | Select-Object -First 1
+                if (-not $asset) { throw "No matching x86_64 .exe asset found in release $($release.tag_name)" }
+                $rdUrl = $asset.browser_download_url
+                Write-Host "    Found: $($asset.name)" -ForegroundColor Gray
+            } catch {
+                Write-Warn "Could not resolve latest release via GitHub API ($_) - using generic 'latest' redirect URL as fallback"
+                $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-x86_64.exe'
+            }
 
             Write-Host "    Downloading RustDesk..." -ForegroundColor Gray
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
             Invoke-WebRequest -Uri $rdUrl -OutFile $rdInstaller -UseBasicParsing
 
             Write-Host "    Installing RustDesk silently..." -ForegroundColor Gray
@@ -297,7 +307,7 @@ try {
         }
 
         # Always (re)apply server + password configuration, even if RustDesk was already
-        # installed — it may have been previously configured for a different relay.
+        # installed - it may have been previously configured for a different relay.
         if (Test-Path $rdExePath) {
             Write-Host "    Applying server + password configuration..." -ForegroundColor Gray
 
