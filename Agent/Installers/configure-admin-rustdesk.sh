@@ -62,10 +62,26 @@ else
 fi
 
 if [[ "$RD_INSTALLED" == false || "$RD_NEEDS_UPGRADE" == true ]]; then
+    ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+
+    echo "    Resolving latest RustDesk release..."
+    RD_API_JSON=$(curl -fsSL -H "User-Agent: PeripheralMonitor-Setup" \
+        "https://api.github.com/repos/rustdesk/rustdesk/releases/latest" 2>/dev/null || true)
+
+    RD_URL=""
+    if [[ -n "$RD_API_JSON" ]]; then
+        RD_URL=$(echo "$RD_API_JSON" | grep -oP "\"browser_download_url\":\s*\"\K[^\"]*rustdesk-[\d.]+-${ARCH}\.deb" | head -1 || true)
+    fi
+
+    if [[ -z "$RD_URL" ]]; then
+        warn "Could not resolve latest release via GitHub API - using generic 'latest' redirect URL as fallback"
+        RD_URL="https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-${ARCH}.deb"
+    else
+        echo "    Found: $(basename "$RD_URL")"
+    fi
+
     echo "    Downloading RustDesk..."
     RD_DEB="/tmp/rustdesk.deb"
-    ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
-    RD_URL="https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-${ARCH}.deb"
 
     if command -v apt-get &>/dev/null; then
         wget -q "$RD_URL" -O "$RD_DEB"

@@ -14,17 +14,21 @@
 
     CASE 2 - RustDesk ALREADY installed (admin has their own setup/relay):
         Does NOT touch the existing installation or its configuration.
-        Instead, deploys a separate PORTABLE copy of RustDesk into its own
-        isolated folder with its own config directory, pointed at this
-        server's relay. A dedicated shortcut launches this isolated copy.
+        Instead, sets up a separate, truly isolated copy in its own folder
+        with its own redirected profile (%USERPROFILE%), so it keeps its
+        own config/log files completely separate from the main install.
         The admin's existing RustDesk + relay remain completely untouched.
+
+    Always resolves the latest RustDesk release via the GitHub API rather
+    than a hardcoded version number, since pinning to a fixed version
+    silently breaks once that release is no longer the latest (assets can
+    be removed or renamed across releases).
 #>
 
 param(
     [Parameter(Mandatory = $true)]
     [string]$ServerAddr,
 
-    [string]$RustDeskMinVersion = "1.2.0",
     [string]$PortablePath = "C:\PeripheralMonitorRustDesk"
 )
 
@@ -34,6 +38,24 @@ function Write-Step($msg) { Write-Host "`n[*] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    [WARN] $msg" -ForegroundColor Yellow }
 function Write-Fail($msg) { Write-Host "    [FAIL] $msg" -ForegroundColor Red }
+
+function Get-LatestRustDeskAsset {
+    # Queries GitHub's API for the latest release and returns the download URL
+    # for the Windows x86_64 installer-style exe (e.g. rustdesk-1.4.6-x86_64.exe).
+    # Never hardcode a version number - GitHub removes/renames old assets over time.
+    $api = "https://api.github.com/repos/rustdesk/rustdesk/releases/latest"
+    $headers = @{ "User-Agent" = "PeripheralMonitor-Setup" }
+    $release = Invoke-RestMethod -Uri $api -Headers $headers -UseBasicParsing
+
+    $asset = $release.assets | Where-Object {
+        $_.name -match '^rustdesk-[\d\.]+-x86_64\.exe$'
+    } | Select-Object -First 1
+
+    if (-not $asset) {
+        throw "Could not find a Windows x86_64 .exe asset in the latest RustDesk release ($($release.tag_name))"
+    }
+    return @{ Url = $asset.browser_download_url; Version = $release.tag_name; FileName = $asset.name }
+}
 
 Write-Host ""
 Write-Host "======================================================" -ForegroundColor White
@@ -48,7 +70,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     exit 1
 }
 
-# ── Detect existing installation ────────────────────────────────────────
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# -- Detect existing installation ----------------------------------------
 Write-Step "Checking for an existing RustDesk installation..."
 
 $mainExePath = "${env:ProgramFiles}\RustDesk\rustdesk.exe"
@@ -59,22 +83,32 @@ if ($mainInstalled) {
     Write-Host "    To avoid overwriting your existing relay configuration," -ForegroundColor Gray
     Write-Host "    a separate, isolated copy will be set up instead." -ForegroundColor Gray
 } else {
-    Write-Ok "No existing RustDesk installation found — clean install path"
+    Write-Ok "No existing RustDesk installation found - clean install path"
 }
 
-# ══════════════════════════════════════════════════════════════════════════
-# CASE 1: Not installed — install normally, configure directly
-# ══════════════════════════════════════════════════════════════════════════
+# -- Resolve latest release (used by both cases below) -------------------
+Write-Step "Checking latest RustDesk release..."
+try {
+    $latest = Get-LatestRustDeskAsset
+    Write-Ok "Latest version: $($latest.Version) ($($latest.FileName))"
+} catch {
+    Write-Fail "Could not determine the latest RustDesk release: $_"
+    Write-Host "    Check your internet connection, or download manually from:" -ForegroundColor Gray
+    Write-Host "    https://github.com/rustdesk/rustdesk/releases" -ForegroundColor Gray
+    exit 1
+}
+
+# ==========================================================================
+# CASE 1: Not installed - install normally, configure directly
+# ==========================================================================
 if (-not $mainInstalled) {
 
-    Write-Step "Installing RustDesk..."
+    Write-Step "Installing RustDesk $($latest.Version)..."
 
-    $rdInstaller = Join-Path $env:TEMP 'rustdesk-installer.exe'
-    $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64.exe'
+    $rdInstaller = Join-Path $env:TEMP $latest.FileName
 
-    Write-Host "    Downloading RustDesk..." -ForegroundColor Gray
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $rdUrl -OutFile $rdInstaller -UseBasicParsing
+    Write-Host "    Downloading..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri $latest.Url -OutFile $rdInstaller -UseBasicParsing
 
     Write-Host "    Installing..." -ForegroundColor Gray
     Start-Process -FilePath $rdInstaller -ArgumentList '--silent-install' -Wait -NoNewWindow
@@ -82,7 +116,7 @@ if (-not $mainInstalled) {
     Start-Sleep -Seconds 3
 
     if (-not (Test-Path $mainExePath)) {
-        Write-Fail "Installation failed — executable not found at $mainExePath"
+        Write-Fail "Installation failed - executable not found at $mainExePath"
         exit 1
     }
     Write-Ok "RustDesk installed"
@@ -100,68 +134,72 @@ if (-not $mainInstalled) {
     exit 0
 }
 
-# ══════════════════════════════════════════════════════════════════════════
-# CASE 2: Already installed — deploy an isolated portable copy instead.
+# ==========================================================================
+# CASE 2: Already installed - set up a truly isolated copy instead.
 # The existing installation and its config are never touched.
-# ══════════════════════════════════════════════════════════════════════════
+#
+# RustDesk is not a "true" portable program out of the box: even the
+# installer-style exe self-extracts to %LOCALAPPDATA%\rustdesk and reads
+# its config from %APPDATA%\rustdesk, both derived from %USERPROFILE%.
+# To isolate it, we run the installer once into a temp profile, copy the
+# resulting program files into our own folder, then launch it later with
+# %USERPROFILE% redirected to that same folder - so its AppData/Roaming
+# config lives inside $PortablePath, never touching the real profile.
+# ==========================================================================
 
 Write-Step "Setting up an isolated RustDesk copy for this deployment..."
 
 New-Item -ItemType Directory -Path $PortablePath -Force | Out-Null
-$portableExe = Join-Path $PortablePath 'rustdesk.exe'
+$isolatedExePath = Join-Path $PortablePath 'rustdesk.exe'
 
-$needsDownload = $true
-if (Test-Path $portableExe) {
-    try {
-        $verInfo = (Get-Item $portableExe).VersionInfo
-        $installedVersion = [version]"$($verInfo.FileMajorPart).$($verInfo.FileMinorPart).$($verInfo.FileBuildPart)"
-        if ($installedVersion -ge [version]$RustDeskMinVersion) {
-            Write-Ok "Isolated copy already present ($installedVersion)"
-            $needsDownload = $false
-        }
-    } catch { }
-}
+if (Test-Path $isolatedExePath) {
+    Write-Ok "Isolated copy already present at $PortablePath"
+} else {
+    $rdInstaller = Join-Path $env:TEMP $latest.FileName
+    Write-Host "    Downloading RustDesk $($latest.Version)..." -ForegroundColor Gray
+    Invoke-WebRequest -Uri $latest.Url -OutFile $rdInstaller -UseBasicParsing
 
-if ($needsDownload) {
-    $portableZip = Join-Path $env:TEMP 'rustdesk-portable.zip'
-    $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-1.2.3-x86_64-portable.exe'
+    Write-Host "    Extracting program files (no install, no relay contact yet)..." -ForegroundColor Gray
+    # Running with --noinstall extracts the program image without registering
+    # it as an installed application or touching the real user profile's config.
+    Start-Process -FilePath $rdInstaller -ArgumentList '--noinstall' -Wait -NoNewWindow -ErrorAction SilentlyContinue
 
-    Write-Host "    Downloading portable RustDesk..." -ForegroundColor Gray
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    try {
-        # The "-portable.exe" build is a self-extracting single file — copy it directly, no install step.
-        Invoke-WebRequest -Uri $rdUrl -OutFile $portableExe -UseBasicParsing
-        Write-Ok "Portable RustDesk downloaded to $portableExe"
-    } catch {
-        Write-Fail "Failed to download portable RustDesk: $_"
-        Write-Host "    Download manually from: https://github.com/rustdesk/rustdesk/releases" -ForegroundColor Gray
-        exit 1
+    $extractedDir = Join-Path $env:LOCALAPPDATA 'rustdesk'
+    if (Test-Path (Join-Path $extractedDir 'rustdesk.exe')) {
+        Copy-Item -Path (Join-Path $extractedDir '*') -Destination $PortablePath -Recurse -Force
+        Write-Ok "Program files copied to isolated folder: $PortablePath"
+    } else {
+        Write-Fail "Could not locate extracted RustDesk program files at $extractedDir"
+        Write-Host "    Falling back to a plain copy of the downloaded installer (will self-extract on first run)." -ForegroundColor Gray
+        Copy-Item -Path $rdInstaller -Destination $isolatedExePath -Force
     }
+    Remove-Item $rdInstaller -ErrorAction SilentlyContinue
 }
 
-# Isolated config directory — completely separate from the main install's config.
-$isolatedConfigDir = Join-Path $PortablePath 'config'
-New-Item -ItemType Directory -Path $isolatedConfigDir -Force | Out-Null
+# Redirect the profile this isolated copy uses for its config/log files,
+# so it never reads or writes to the admin's real %APPDATA%\rustdesk.
+$isolatedProfileDir = Join-Path $PortablePath 'profile'
+New-Item -ItemType Directory -Path $isolatedProfileDir -Force | Out-Null
 
 Write-Step "Configuring the isolated copy to use this server's relay..."
 Write-Host "    (your existing RustDesk installation and its settings are NOT modified)" -ForegroundColor Gray
 
-# RUSTDESK_CONFIG_DIR redirects where this process instance reads/writes its config,
-# isolating it from the main installation's config under %APPDATA%\RustDesk.
-$env:RUSTDESK_CONFIG_DIR = $isolatedConfigDir
-& $portableExe --config "host=$ServerAddr,key=" 2>$null
-Start-Sleep -Seconds 1
+$prevUserProfile = $env:USERPROFILE
+$env:USERPROFILE = $isolatedProfileDir
+try {
+    & $isolatedExePath --config "host=$ServerAddr,key=" 2>$null
+    Start-Sleep -Seconds 1
+} finally {
+    $env:USERPROFILE = $prevUserProfile
+}
 
 Write-Ok "Isolated RustDesk configured to use: $ServerAddr"
 
-# Desktop shortcut that launches the isolated copy with the right env var set,
-# so double-clicking it never touches the main installation.
+# Launcher that always redirects %USERPROFILE% before starting the isolated copy,
+# so double-clicking it never touches the main installation's profile/config.
 $launcherPath = Join-Path $PortablePath 'Launch-PeripheralMonitor-RustDesk.bat'
-@"
-@echo off
-set RUSTDESK_CONFIG_DIR=$isolatedConfigDir
-start "" "$portableExe" %*
-"@ | Set-Content -Path $launcherPath -Encoding ASCII
+$launcherContent = "@echo off`r`nset USERPROFILE=$isolatedProfileDir`r`nstart `"`" `"$isolatedExePath`" %*`r`n"
+Set-Content -Path $launcherPath -Value $launcherContent -Encoding ASCII
 
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) 'Peripheral Monitor Remote Desktop.lnk'
 $shell = New-Object -ComObject WScript.Shell
@@ -183,7 +221,7 @@ Write-Host ""
 Write-Host "  IMPORTANT: dashboard 'rustdesk://' links open whichever" -ForegroundColor Yellow
 Write-Host "  RustDesk install is registered as the system's protocol" -ForegroundColor Yellow
 Write-Host "  handler - which will be your EXISTING install, not this" -ForegroundColor Yellow
-Write-Host "  isolated one. For sessions through THIS server, launch" -ForegroundColor Yellow
-Write-Host "  '$launcherPath' manually and enter the agent's RustDesk ID" -ForegroundColor Yellow
-Write-Host "  shown on the dashboard yourself." -ForegroundColor Yellow
+Write-Host "  isolated one. For sessions through THIS server, double-click" -ForegroundColor Yellow
+Write-Host "  the 'Peripheral Monitor Remote Desktop' desktop shortcut and" -ForegroundColor Yellow
+Write-Host "  enter the agent's RustDesk ID shown on the dashboard yourself." -ForegroundColor Yellow
 Write-Host ""
