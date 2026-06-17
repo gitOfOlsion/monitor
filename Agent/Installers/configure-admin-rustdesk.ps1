@@ -179,21 +179,33 @@ if (Test-Path $isolatedExePath) {
 # Redirect the profile this isolated copy uses for its config/log files,
 # so it never reads or writes to the admin's real %APPDATA%\rustdesk.
 $isolatedProfileDir = Join-Path $PortablePath 'profile'
-New-Item -ItemType Directory -Path $isolatedProfileDir -Force | Out-Null
+$isolatedConfigDir  = Join-Path $isolatedProfileDir 'AppData\Roaming\RustDesk\config'
+New-Item -ItemType Directory -Path $isolatedConfigDir -Force | Out-Null
 
 Write-Step "Configuring the isolated copy to use this server's relay..."
 Write-Host "    (your existing RustDesk installation and its settings are NOT modified)" -ForegroundColor Gray
 
-$prevUserProfile = $env:USERPROFILE
-$env:USERPROFILE = $isolatedProfileDir
-try {
-    & $isolatedExePath --config "host=$ServerAddr,key=" 2>$null
-    Start-Sleep -Seconds 1
-} finally {
-    $env:USERPROFILE = $prevUserProfile
-}
+# IMPORTANT: we do NOT call 'rustdesk.exe --config' here. That subcommand talks
+# to an already-running RustDesk instance over local IPC and applies the change
+# to WHICHEVER copy is currently alive (your main install, since its service is
+# running) - completely ignoring our %USERPROFILE% redirect. Calling it would
+# silently reconfigure your real RustDesk instead of the isolated one.
+#
+# Instead we write RustDesk2.toml directly into the isolated profile, which is
+# the same file the application itself would produce - no live process involved.
+$configToml = @"
+rendezvous_server = '$ServerAddr'
+nat_type = 1
+serial = 0
+
+[options]
+custom-rendezvous-server = '$ServerAddr'
+"@
+Set-Content -Path (Join-Path $isolatedConfigDir 'RustDesk2.toml') -Value $configToml -Encoding ASCII
 
 Write-Ok "Isolated RustDesk configured to use: $ServerAddr"
+Write-Host "    Config file written directly to: $isolatedConfigDir\RustDesk2.toml" -ForegroundColor Gray
+Write-Host "    (no live RustDesk process was contacted)" -ForegroundColor Gray
 
 # Launcher that always redirects %USERPROFILE% before starting the isolated copy,
 # so double-clicking it never touches the main installation's profile/config.
