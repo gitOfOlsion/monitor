@@ -312,13 +312,16 @@ try {
         }
 
         # The RustDesk service (running as LocalService) keeps its own config under
-        # ServiceProfiles, separate from any interactive user's %APPDATA%. This is the
-        # ID/server/password that actually applies to incoming connections, so we always
-        # check and configure THIS path, not the interactive user's profile.
+        # ServiceProfiles, separate from any interactive user's %APPDATA%. We write
+        # the config file DIRECTLY to the service profile path rather than calling
+        # "rustdesk.exe --config" which routes through IPC to whichever process is
+        # currently alive and may write to the interactive user's profile instead.
         if (Test-Path $rdExePath) {
             Write-Host "    Applying server + password configuration..." -ForegroundColor Gray
 
-            $serviceConfigPath = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config\RustDesk2.toml"
+            $serviceConfigDir = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
+            $serviceConfigPath = Join-Path $serviceConfigDir 'RustDesk2.toml'
+
             $alreadyCorrect = $false
             if (Test-Path $serviceConfigPath) {
                 $existing = Get-Content $serviceConfigPath -Raw -ErrorAction SilentlyContinue
@@ -330,17 +333,34 @@ try {
             if ($alreadyCorrect) {
                 Write-Ok "RustDesk already configured for this server ($rdServerAddr) - skipping reconfiguration"
             } else {
-                # Configure rendezvous/relay server with the server's real public key -
-                # required, since hbbs always enforces key matching (no "disable" option).
-                & $rdExePath --config "host=$rdServerAddr,key=$rdKey" 2>$null
-                Start-Sleep -Seconds 1
+                # Write directly to the service profile config directory - no live process contacted.
+                # This is the same reliable approach used by the admin isolator script (Case 2).
+                New-Item -ItemType Directory -Path $serviceConfigDir -Force | Out-Null
+                $configContent = @"
+rendezvous_server = '${rdServerAddr}:21116'
+nat_type = 1
+serial = 0
 
-                # Set fixed permanent password
-                & $rdExePath --password $rdPassword 2>$null
-                Start-Sleep -Seconds 1
+[options]
+custom-rendezvous-server = '$rdServerAddr'
+relay-server = '$rdServerAddr'
+key = '$rdKey'
+always-use-relay = 'Y'
+"@
+                Set-Content -Path $serviceConfigPath -Value $configContent -Encoding ASCII
 
-                Write-Ok "RustDesk reconfigured for this server (was previously pointed elsewhere, or freshly installed)"
+                # Restart RustDesk service so it reads the new config immediately
+                Write-Host "    Restarting RustDesk service to apply new config..." -ForegroundColor Gray
+                Restart-Service rustdesk -ErrorAction SilentlyContinue
+                Start-Sleep -Seconds 3
+
+                Write-Ok "RustDesk service config updated (written directly to service profile)"
             }
+
+            # Also set the fixed password via the service's IPC now that it's running
+            # with the correct server config.
+            & $rdExePath --password $rdPassword 2>$null
+            Start-Sleep -Seconds 1
 
             Write-Host "    Server: $rdServerAddr" -ForegroundColor Gray
 

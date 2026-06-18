@@ -26,12 +26,8 @@
 #>
 
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$ServerAddr,
-
-    [Parameter(Mandatory = $true)]
-    [string]$Key,
-
+    [string]$ServerAddr = "",
+    [string]$Key = "",
     [string]$PortablePath = "C:\PeripheralMonitorRustDesk"
 )
 
@@ -41,6 +37,16 @@ function Write-Step($msg) { Write-Host "`n[*] $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    [WARN] $msg" -ForegroundColor Yellow }
 function Write-Fail($msg) { Write-Host "    [FAIL] $msg" -ForegroundColor Red }
+
+# Validate - either pre-filled by the server-generated download, or passed manually.
+if ([string]::IsNullOrWhiteSpace($ServerAddr) -or [string]::IsNullOrWhiteSpace($Key)) {
+    Write-Fail "ServerAddr and Key are required."
+    Write-Host "  If you downloaded this script from the dashboard, re-download it -" -ForegroundColor Gray
+    Write-Host "  the dashboard pre-fills these values automatically." -ForegroundColor Gray
+    Write-Host "  Or run manually:" -ForegroundColor Gray
+    Write-Host "    .\configure-admin-rustdesk.ps1 -ServerAddr <ip> -Key <public_key>" -ForegroundColor Gray
+    exit 1
+}
 
 function Get-LatestRustDeskAsset {
     # Queries GitHub's API for the latest release and returns the download URL
@@ -203,7 +209,9 @@ serial = 0
 
 [options]
 custom-rendezvous-server = '$ServerAddr'
+relay-server = '$ServerAddr'
 key = '$Key'
+always-use-relay = 'Y'
 "@
 Set-Content -Path (Join-Path $isolatedConfigDir 'RustDesk2.toml') -Value $configToml -Encoding ASCII
 
