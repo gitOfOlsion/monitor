@@ -26,17 +26,17 @@ echo "  RustDesk Client Configuration"
 echo "======================================================"
 
 if [[ -z "$SERVER_ADDR" || -z "$RD_KEY" ]]; then
-    fail "Usage: sudo bash configure-admin-rustdesk.sh <server_addr> <server_key>"
-    echo "  Example: sudo bash configure-admin-rustdesk.sh 185.218.126.64 EA5kNf0jxtdPxzdnNZgXRi9vTJEYC+6pV1MWlUf0v2Q="
-    echo "  Get the key from the dashboard's RustDesk setup banner, or directly via:"
-    echo "    docker exec pm_hbbs cat id_ed25519.pub"
+    fail "ServerAddr and Key are required."
+    echo "  If you downloaded this script from the dashboard, re-download it —"
+    echo "  the dashboard pre-fills these values automatically."
+    echo "  Or run manually: sudo bash configure-admin-rustdesk.sh <ip> <public_key>"
     exit 1
 fi
 echo "  Target server: $SERVER_ADDR"
 echo ""
 
 if [[ $EUID -ne 0 ]]; then
-    fail "This script must be run as root (sudo bash configure-admin-rustdesk.sh $SERVER_ADDR $RD_KEY)"
+    fail "This script must be run as root (sudo bash configure-admin-rustdesk.sh)"
     exit 1
 fi
 
