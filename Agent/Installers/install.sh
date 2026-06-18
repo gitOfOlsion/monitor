@@ -302,9 +302,11 @@ RD_MIN_VERSION="1.2.0"
 
 RD_SERVER_ADDR=""
 RD_PASSWORD=""
+RD_KEY=""
 if [[ -f "$INSTALL_DIR/appsettings.local.json" ]]; then
-    RD_SERVER_ADDR=$(grep -A2 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"ServerAddr"\s*:\s*"\K[^"]*' || true)
-    RD_PASSWORD=$(grep -A2 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Password"\s*:\s*"\K[^"]*' || true)
+    RD_SERVER_ADDR=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"ServerAddr"\s*:\s*"\K[^"]*' || true)
+    RD_PASSWORD=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Password"\s*:\s*"\K[^"]*' || true)
+    RD_KEY=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Key"\s*:\s*"\K[^"]*' || true)
 fi
 
 version_ge() {
@@ -315,6 +317,9 @@ version_ge() {
 
 if [[ -z "$RD_SERVER_ADDR" ]]; then
     warn "No RustDesk server configured in appsettings.local.json — skipping remote desktop setup"
+elif [[ -z "$RD_KEY" ]]; then
+    warn "No RustDesk server key configured — skipping remote desktop setup"
+    echo "    (the server admin needs to set RUSTDESK_KEY in .env - see docker-compose.yml comments)"
 elif ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d /usr/share/xsessions ]]; then
     warn "No graphical desktop environment detected — RustDesk requires a GUI session, skipping"
     echo "    Device monitoring will continue to work normally on this headless machine."
@@ -379,7 +384,7 @@ else
         # and pointed at a different relay (public servers, or another deployment).
         RD_CONFIG_PATH="/root/.config/rustdesk/RustDesk2.toml"
         RD_ALREADY_CORRECT=false
-        if [[ -f "$RD_CONFIG_PATH" ]] && grep -q "$RD_SERVER_ADDR" "$RD_CONFIG_PATH" 2>/dev/null; then
+        if [[ -f "$RD_CONFIG_PATH" ]] && grep -q "$RD_SERVER_ADDR" "$RD_CONFIG_PATH" 2>/dev/null && grep -q "$RD_KEY" "$RD_CONFIG_PATH" 2>/dev/null; then
             RD_ALREADY_CORRECT=true
         fi
 
@@ -387,7 +392,9 @@ else
             ok "RustDesk already configured for this server ($RD_SERVER_ADDR) — skipping reconfiguration"
         else
             echo "    Applying server + password configuration..."
-            rustdesk --config "host=$RD_SERVER_ADDR,key=" 2>/dev/null || true
+            # hbbs always enforces key matching - there's no "disable" option - so the
+            # real server public key (RUSTDESK_KEY in .env) must be used here.
+            rustdesk --config "host=$RD_SERVER_ADDR,key=$RD_KEY" 2>/dev/null || true
             rustdesk --password "$RD_PASSWORD" 2>/dev/null || true
             ok "RustDesk reconfigured for this server (was previously pointed elsewhere, or freshly installed)"
         fi

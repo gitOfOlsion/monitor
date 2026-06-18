@@ -243,16 +243,21 @@ try {
     $rdConfig = Join-Path $InstallPath 'appsettings.local.json'
     $rdServerAddr = ''
     $rdPassword   = ''
+    $rdKey        = ''
     if (Test-Path $rdConfig) {
         $cfg = Get-Content $rdConfig -Raw | ConvertFrom-Json
         if ($cfg.RustDesk) {
             $rdServerAddr = $cfg.RustDesk.ServerAddr
             $rdPassword   = $cfg.RustDesk.Password
+            $rdKey        = $cfg.RustDesk.Key
         }
     }
 
     if ([string]::IsNullOrWhiteSpace($rdServerAddr)) {
         Write-Warn "No RustDesk server configured in appsettings.local.json - skipping remote desktop setup"
+    } elseif ([string]::IsNullOrWhiteSpace($rdKey)) {
+        Write-Warn "No RustDesk server key configured - skipping remote desktop setup"
+        Write-Host "    (the server admin needs to set RUSTDESK_KEY in .env - see docker-compose.yml comments)" -ForegroundColor Gray
     } else {
         $rdExePath = "${env:ProgramFiles}\RustDesk\rustdesk.exe"
         $rdInstalled = $false
@@ -317,7 +322,7 @@ try {
             $alreadyCorrect = $false
             if (Test-Path $serviceConfigPath) {
                 $existing = Get-Content $serviceConfigPath -Raw -ErrorAction SilentlyContinue
-                if ($existing -and $existing -match [regex]::Escape($rdServerAddr)) {
+                if ($existing -and $existing -match [regex]::Escape($rdServerAddr) -and $existing -match [regex]::Escape($rdKey)) {
                     $alreadyCorrect = $true
                 }
             }
@@ -325,8 +330,9 @@ try {
             if ($alreadyCorrect) {
                 Write-Ok "RustDesk already configured for this server ($rdServerAddr) - skipping reconfiguration"
             } else {
-                # Configure rendezvous/relay server (key left empty - using default unencrypted handshake)
-                & $rdExePath --config "host=$rdServerAddr,key=" 2>$null
+                # Configure rendezvous/relay server with the server's real public key -
+                # required, since hbbs always enforces key matching (no "disable" option).
+                & $rdExePath --config "host=$rdServerAddr,key=$rdKey" 2>$null
                 Start-Sleep -Seconds 1
 
                 # Set fixed permanent password

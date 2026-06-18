@@ -12,6 +12,7 @@ set -euo pipefail
 
 RD_MIN_VERSION="1.2.0"
 SERVER_ADDR="${1:-}"
+RD_KEY="${2:-}"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 step()  { echo -e "\n${CYAN}[*] $*${NC}"; }
@@ -24,16 +25,18 @@ echo "======================================================"
 echo "  RustDesk Client Configuration"
 echo "======================================================"
 
-if [[ -z "$SERVER_ADDR" ]]; then
-    fail "Usage: sudo bash configure-admin-rustdesk.sh <server_addr>"
-    echo "  Example: sudo bash configure-admin-rustdesk.sh 185.218.126.64"
+if [[ -z "$SERVER_ADDR" || -z "$RD_KEY" ]]; then
+    fail "Usage: sudo bash configure-admin-rustdesk.sh <server_addr> <server_key>"
+    echo "  Example: sudo bash configure-admin-rustdesk.sh 185.218.126.64 EA5kNf0jxtdPxzdnNZgXRi9vTJEYC+6pV1MWlUf0v2Q="
+    echo "  Get the key from the dashboard's RustDesk setup banner, or directly via:"
+    echo "    docker exec pm_hbbs cat id_ed25519.pub"
     exit 1
 fi
 echo "  Target server: $SERVER_ADDR"
 echo ""
 
 if [[ $EUID -ne 0 ]]; then
-    fail "This script must be run as root (sudo bash configure-admin-rustdesk.sh $SERVER_ADDR)"
+    fail "This script must be run as root (sudo bash configure-admin-rustdesk.sh $SERVER_ADDR $RD_KEY)"
     exit 1
 fi
 
@@ -102,7 +105,7 @@ step "Configuring RustDesk to use this server's relay..."
 echo "    This OVERWRITES any previous relay configuration"
 echo "    (including the public RustDesk default, or any other self-hosted instance)."
 
-rustdesk --config "host=$SERVER_ADDR,key=" 2>/dev/null || true
+rustdesk --config "host=$SERVER_ADDR,key=$RD_KEY" 2>/dev/null || true
 
 ok "RustDesk is now configured to use: $SERVER_ADDR"
 echo ""

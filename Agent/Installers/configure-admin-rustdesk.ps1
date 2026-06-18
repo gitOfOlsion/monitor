@@ -29,6 +29,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ServerAddr,
 
+    [Parameter(Mandatory = $true)]
+    [string]$Key,
+
     [string]$PortablePath = "C:\PeripheralMonitorRustDesk"
 )
 
@@ -122,7 +125,7 @@ if (-not $mainInstalled) {
     Write-Ok "RustDesk installed"
 
     Write-Step "Configuring RustDesk to use this server's relay..."
-    & $mainExePath --config "host=$ServerAddr,key=" 2>$null
+    & $mainExePath --config "host=$ServerAddr,key=$Key" 2>$null
     Start-Sleep -Seconds 1
     Write-Ok "RustDesk is now configured to use: $ServerAddr"
 
@@ -200,6 +203,7 @@ serial = 0
 
 [options]
 custom-rendezvous-server = '$ServerAddr'
+key = '$Key'
 "@
 Set-Content -Path (Join-Path $isolatedConfigDir 'RustDesk2.toml') -Value $configToml -Encoding ASCII
 
