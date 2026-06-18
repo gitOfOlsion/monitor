@@ -1,4 +1,4 @@
-#version: "3.9"
+version: "3.9"
 
 # ── Single version variable — matches Directory.Build.props DotNetVersion ──
 x-dotnet-version: &dotnet-version "10.0"
@@ -93,11 +93,19 @@ services:
   # ── RustDesk self-hosted relay (remote desktop) ─────────────────────────
   # hbbs = ID/rendezvous server. hbbr = relay server for NAT traversal.
   # Agents + admin RustDesk clients connect to these via the VPS public IP.
+  #
+  # IMPORTANT: "-k _" forces unencrypted/no-key mode. Without it, hbbs generates
+  # its own keypair (id_ed25519/.pub) on first start, and every client MUST be
+  # configured with that exact public key or connections fail with "Key mismatch".
+  # Since every install script in this project configures clients with an empty
+  # key= (host=...,key=), hbbs and hbbr must both run with "-k _" to match -
+  # otherwise every single connection attempt fails this way, regardless of
+  # how correctly the rest of the setup is done.
   hbbs:
     image: rustdesk/rustdesk-server:latest
     container_name: pm_hbbs
     restart: unless-stopped
-    command: hbbs -r ${PUBLIC_IP:-127.0.0.1}:21117
+    command: hbbs -r ${PUBLIC_IP:-127.0.0.1}:21117 -k _
     ports:
       - "21115:21115"     # NAT type test
       - "21116:21116"     # ID server (TCP)
@@ -111,7 +119,7 @@ services:
     image: rustdesk/rustdesk-server:latest
     container_name: pm_hbbr
     restart: unless-stopped
-    command: hbbr
+    command: hbbr -k _
     ports:
       - "21117:21117"     # Relay (TCP)
       - "21119:21119"     # Relay websocket
