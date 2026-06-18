@@ -28,9 +28,10 @@
         @if (_rdInfoKeyConfigured)
         {
             <p style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">
-                Run once as Administrator/root:<br />
-                <code>configure-admin-rustdesk.ps1 -ServerAddr @_rdInfoServerAddr -Key @_rdInfoKey</code> (Windows)<br />
-                or <code>sudo bash configure-admin-rustdesk.sh @_rdInfoServerAddr @_rdInfoKey</code> (Linux).
+                Download the script above — it has your server address and key pre-filled.
+                Run it once as Administrator/root:<br />
+                <code>powershell -ExecutionPolicy Bypass -File .\configure-admin-rustdesk.ps1</code> (Windows)<br />
+                or <code>sudo bash configure-admin-rustdesk.sh</code> (Linux).
                 This only configures your own client — it does not touch any agent machine.
             </p>
         }

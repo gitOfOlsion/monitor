@@ -431,9 +431,9 @@ public class DownloadController : ScopedController
     }
 
     /// <summary>
-    /// Download the one-time RustDesk configurator for admins. This is NOT the agent —
-    /// it just points the admin's own RustDesk client at this deployment's relay server,
-    /// so "Remote Desktop" links from the dashboard connect correctly. Run once per admin machine.
+    /// Download a pre-filled RustDesk configurator script for admins — ServerAddr and Key
+    /// are baked in so the admin just double-clicks (Windows) or runs with sudo (Linux),
+    /// no parameters needed. Generated on demand from current server config.
     /// </summary>
     [HttpGet("rustdesk-setup/{platform}")]
     public IActionResult DownloadRustDeskSetup(string platform)
@@ -442,12 +442,39 @@ public class DownloadController : ScopedController
         if (platform != "windows" && platform != "linux")
             return BadRequest(new { error = "Platform must be 'windows' or 'linux'" });
 
-        var fileName = platform == "windows" ? "configure-admin-rustdesk.ps1" : "configure-admin-rustdesk.sh";
-        var path = Path.Combine("/app/agent-packages/installers", fileName);
-        if (!System.IO.File.Exists(path))
-            return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
+        var addr = _config["RustDesk:ServerAddr"] ?? "";
+        var key  = _config["RustDesk:Key"] ?? "";
 
-        var bytes = System.IO.File.ReadAllBytes(path);
-        return File(bytes, "text/plain", fileName);
+        if (string.IsNullOrEmpty(addr) || string.IsNullOrEmpty(key))
+            return BadRequest(new { error = "RUSTDESK_KEY or PUBLIC_IP is not configured in .env. Set them and restart the server." });
+
+        if (platform == "windows")
+        {
+            var scriptPath = Path.Combine("/app/agent-packages/installers", "configure-admin-rustdesk.ps1");
+            if (!System.IO.File.Exists(scriptPath))
+                return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
+
+            var original = System.IO.File.ReadAllText(scriptPath);
+            // Inject the values right after the param() block by replacing the empty defaults.
+            // The script's param() block uses empty string defaults; the server pre-fills them
+            // so the admin can just run the script with no arguments.
+            var prefilled = original
+                .Replace("[string]$ServerAddr = \"\"", $"[string]$ServerAddr = \"{addr}\"")
+                .Replace("[string]$Key = \"\"", $"[string]$Key = \"{key}\"");
+            return File(System.Text.Encoding.ASCII.GetBytes(prefilled), "text/plain", "configure-admin-rustdesk.ps1");
+        }
+        else
+        {
+            var scriptPath = Path.Combine("/app/agent-packages/installers", "configure-admin-rustdesk.sh");
+            if (!System.IO.File.Exists(scriptPath))
+                return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
+
+            var original = System.IO.File.ReadAllText(scriptPath);
+            // Replace the positional argument reads with hardcoded values.
+            var prefilled = original
+                .Replace(@"SERVER_ADDR=""${1:-}""", $"SERVER_ADDR='{addr}'")
+                .Replace(@"RD_KEY=""${2:-}""", $"RD_KEY='{key}'");
+            return File(System.Text.Encoding.UTF8.GetBytes(prefilled), "text/plain", "configure-admin-rustdesk.sh");
+        }
     }
 }
