@@ -415,6 +415,22 @@ public class DownloadController : ScopedController
     });
 
     /// <summary>
+    /// Returns this deployment's RustDesk server address and public key, so admins
+    /// can run configure-admin-rustdesk.ps1/.sh with the exact values needed.
+    /// Viewers cannot see this (it's setup info, not needed for read-only use).
+    /// </summary>
+    [HttpGet("rustdesk-info")]
+    public IActionResult GetRustDeskInfo()
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var addr = _config["RustDesk:ServerAddr"] ?? "";
+        var key  = _config["RustDesk:Key"] ?? "";
+        return Ok(new { serverAddr = addr, key, keyConfigured = !string.IsNullOrEmpty(key) });
+    }
+
+    /// <summary>
     /// Download the one-time RustDesk configurator for admins. This is NOT the agent —
     /// it just points the admin's own RustDesk client at this deployment's relay server,
     /// so "Remote Desktop" links from the dashboard connect correctly. Run once per admin machine.
