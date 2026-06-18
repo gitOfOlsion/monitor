@@ -19,17 +19,29 @@
         <strong>🖥️ First time using Remote Desktop?</strong>
         Your own RustDesk client needs to be pointed at this server once, otherwise
         "Remote Desktop" links will silently fail to connect (they'll try the public
-        RustDesk network or whatever relay you used before instead of this deployment).
+        RustDesk network, a different relay, or fail with "Key mismatch").
         <div style="margin-top:.5rem">
             <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/windows">⬇ Windows setup script</a>
             <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/linux">⬇ Linux setup script</a>
             <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => _showRustDeskBanner = false">Dismiss</button>
         </div>
-        <p style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">
-            Run once as Administrator/root: <code>configure-admin-rustdesk.ps1 -ServerAddr @ServerHost</code> (Windows)
-            or <code>sudo bash configure-admin-rustdesk.sh @ServerHost</code> (Linux). This only configures
-            your own client — it does not touch any agent machine.
-        </p>
+        @if (_rdInfoKeyConfigured)
+        {
+            <p style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">
+                Run once as Administrator/root:<br />
+                <code>configure-admin-rustdesk.ps1 -ServerAddr @_rdInfoServerAddr -Key @_rdInfoKey</code> (Windows)<br />
+                or <code>sudo bash configure-admin-rustdesk.sh @_rdInfoServerAddr @_rdInfoKey</code> (Linux).
+                This only configures your own client — it does not touch any agent machine.
+            </p>
+        }
+        else
+        {
+            <p style="margin-top:.5rem;font-size:12px;color:var(--danger)">
+                ⚠ RustDesk server key is not configured yet (RUSTDESK_KEY in .env). Every connection
+                will fail with "Key mismatch" until this is set. Get the key with
+                <code>docker exec pm_hbbs cat id_ed25519.pub</code> on the server, add it to .env, and restart.
+            </p>
+        }
     </div>
 }
 
@@ -250,7 +262,8 @@ else
     private bool _loading = true;
     private bool _canCommand;
     private bool _showRustDeskBanner = true;
-    private string ServerHost => new Uri(Nav.BaseUri).Host;
+    private string? _rdInfoServerAddr, _rdInfoKey;
+    private bool _rdInfoKeyConfigured;
 
     // Remote desktop modal state
     private AgentDto? _rdAgent;
@@ -272,6 +285,11 @@ else
         var auth = await AuthState.GetAuthenticationStateAsync();
         var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
         _canCommand = role is "SuperAdmin" or "InstitutionAdmin";
+        if (_canCommand)
+        {
+            var (addr, key, configured) = await Api.GetRustDeskInfoAsync();
+            _rdInfoServerAddr = addr; _rdInfoKey = key; _rdInfoKeyConfigured = configured;
+        }
         await LoadAsync();
     }
 
