@@ -180,6 +180,17 @@ public class ServerApiClient
 
     private record RemoteDesktopResponse(string RustDeskId, string Password, string Uri, string IsolatedUri);
 
+    public async Task<(string? serverAddr, string? key, bool keyConfigured)> GetRustDeskInfoAsync()
+    {
+        AttachIdentity();
+        var r = await _http.GetAsync("/api/download/rustdesk-info");
+        if (!r.IsSuccessStatusCode) return (null, null, false);
+        var body = await r.Content.ReadFromJsonAsync<RustDeskInfoResponse>();
+        return (body?.ServerAddr, body?.Key, body?.KeyConfigured ?? false);
+    }
+
+    private record RustDeskInfoResponse(string ServerAddr, string Key, bool KeyConfigured);
+
     private record FileListResponse(string? FolderPath, List<SharedFileDto> Files);
 
     private record ProvisionResponse(string Token);
