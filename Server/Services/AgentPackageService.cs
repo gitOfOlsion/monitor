@@ -49,13 +49,15 @@ public class AgentPackageService
         // 2. Add appsettings.local.json with pre-filled token + RustDesk config
         var rustDeskAddr = _config["RustDesk:ServerAddr"] ?? "";
         var rustDeskPass = _config["RustDesk:Password"] ?? "";
+        var rustDeskKey  = _config["RustDesk:Key"] ?? "";
         var settingsJson = $$"""
             {
               "SignalRUrl": "{{serverUrl}}/monitor",
               "JwtToken": "{{token}}",
               "RustDesk": {
                 "ServerAddr": "{{rustDeskAddr}}",
-                "Password": "{{rustDeskPass}}"
+                "Password": "{{rustDeskPass}}",
+                "Key": "{{rustDeskKey}}"
               }
             }
             """;
