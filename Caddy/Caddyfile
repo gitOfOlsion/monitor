@@ -25,6 +25,11 @@
         reverse_proxy server:5000
     }
 
+    # Guacamole remote desktop gateway
+    handle /remote/* {
+        reverse_proxy guacamole:8080
+    }
+
     # Seq log viewer
     handle /seq/* {
         uri strip_prefix /seq

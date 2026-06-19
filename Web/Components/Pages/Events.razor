@@ -5,6 +5,7 @@
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
 @inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
 
 <PageTitle>Device Events</PageTitle>
 
@@ -40,7 +41,7 @@
             @foreach (var e in Filtered)
             {
                 <tr>
-                    <td class="pm-mono">@e.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                    <td class="pm-mono">@Fmt(e.Timestamp)</td>
                     <td>@e.MachineName</td>
                     <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
                     <td>@e.FriendlyName</td>
@@ -58,6 +59,21 @@
     private List<DeviceChangedPayload> _events = [];
     private List<string> _cats = [];
     private string _fMachine = "", _fType = "", _fCat = "";
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
 
     private IEnumerable<DeviceChangedPayload> Filtered => _events.Where(e =>
         (string.IsNullOrEmpty(_fMachine) || e.MachineName.Contains(_fMachine, StringComparison.OrdinalIgnoreCase)) &&

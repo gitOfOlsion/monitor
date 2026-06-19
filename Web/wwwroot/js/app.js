@@ -38,3 +38,11 @@ function pmOpenExternalLink(uri) {
     document.body.appendChild(iframe);
     setTimeout(() => document.body.removeChild(iframe), 1000);
 }
+
+/**
+ * Return the browser's UTC offset in minutes (e.g. +120 for CEST).
+ * Called once on page load to let the server format times in the user's timezone.
+ */
+function pmGetTimezoneOffsetMinutes() {
+    return -new Date().getTimezoneOffset(); // JS returns opposite sign convention
+}

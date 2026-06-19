@@ -225,184 +225,33 @@ Write-Ok "Service '$ServiceName' registered"
 Write-Ok "Recovery policy: auto-restart on failure (5s, 10s, 30s)"
 
 # ======================================================================
-# STEP 6: Install and configure RustDesk (remote desktop)
-# ======================================================================
-# Checklist (same pattern as the .NET runtime check above):
-#   1. Is RustDesk installed at all?            -> if not, download + silent-install
-#   2. Is the installed version recent enough?  -> if not, upgrade (reinstall over it)
-#   3. Is it already pointed at OUR server?      -> if not, reconfigure host + password
-#      (always re-apply config even if already installed, in case it was
-#       previously configured for a different relay/server)
+# STEP 6: Enable Remote Desktop (RDP) for Guacamole web-based access
 # ======================================================================
 
-Write-Step "Checking RustDesk (remote desktop)..."
-
-$RustDeskMinVersion = [version]"1.2.0"
+Write-Step "Enabling Remote Desktop (RDP)..."
 
 try {
-    $rdConfig = Join-Path $InstallPath 'appsettings.local.json'
-    $rdServerAddr = ''
-    $rdPassword   = ''
-    $rdKey        = ''
-    if (Test-Path $rdConfig) {
-        $cfg = Get-Content $rdConfig -Raw | ConvertFrom-Json
-        if ($cfg.RustDesk) {
-            $rdServerAddr = $cfg.RustDesk.ServerAddr
-            $rdPassword   = $cfg.RustDesk.Password
-            $rdKey        = $cfg.RustDesk.Key
-        }
-    }
+    # Enable RDP via registry
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+        -Name "fDenyTSConnections" -Value 0 -Type DWord
+    Write-Ok "Remote Desktop enabled"
 
-    if ([string]::IsNullOrWhiteSpace($rdServerAddr)) {
-        Write-Warn "No RustDesk server configured in appsettings.local.json - skipping remote desktop setup"
-    } elseif ([string]::IsNullOrWhiteSpace($rdKey)) {
-        Write-Warn "No RustDesk server key configured - skipping remote desktop setup"
-        Write-Host "    (the server admin needs to set RUSTDESK_KEY in .env - see docker-compose.yml comments)" -ForegroundColor Gray
-    } else {
-        $rdExePath = "${env:ProgramFiles}\RustDesk\rustdesk.exe"
-        $rdInstalled = $false
-        $rdNeedsUpgrade = $false
+    # Allow RDP through Windows Firewall
+    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
+    # If the above fails (older Windows), use netsh
+    netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
+    Write-Ok "Firewall rule enabled for Remote Desktop"
 
-        if (Test-Path $rdExePath) {
-            $rdInstalled = $true
-            try {
-                $verInfo = (Get-Item $rdExePath).VersionInfo
-                $installedVersion = [version]"$($verInfo.FileMajorPart).$($verInfo.FileMinorPart).$($verInfo.FileBuildPart)"
-                if ($installedVersion -lt $RustDeskMinVersion) {
-                    Write-Warn "RustDesk $installedVersion is older than required $RustDeskMinVersion - will upgrade"
-                    $rdNeedsUpgrade = $true
-                } else {
-                    Write-Ok "RustDesk $installedVersion already installed (meets minimum $RustDeskMinVersion)"
-                }
-            } catch {
-                Write-Warn "Could not determine installed RustDesk version - will reinstall to be safe"
-                $rdNeedsUpgrade = $true
-            }
-        } else {
-            Write-Warn "RustDesk not found - will install"
-        }
+    # Set Network Level Authentication (NLA) - allows connection with credentials
+    Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+        -Name "UserAuthentication" -Value 1 -Type DWord -ErrorAction SilentlyContinue
+    Write-Ok "Network Level Authentication configured"
 
-        if (-not $rdInstalled -or $rdNeedsUpgrade) {
-            $rdInstaller = Join-Path $env:TEMP 'rustdesk-installer.exe'
-
-            Write-Host "    Resolving latest RustDesk release..." -ForegroundColor Gray
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            try {
-                $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/rustdesk/rustdesk/releases/latest' `
-                    -Headers @{ "User-Agent" = "PeripheralMonitor-Agent" } -UseBasicParsing
-                $asset = $release.assets | Where-Object { $_.name -match '^rustdesk-[\d\.]+-x86_64\.exe$' } | Select-Object -First 1
-                if (-not $asset) { throw "No matching x86_64 .exe asset found in release $($release.tag_name)" }
-                $rdUrl = $asset.browser_download_url
-                Write-Host "    Found: $($asset.name)" -ForegroundColor Gray
-            } catch {
-                Write-Warn "Could not resolve latest release via GitHub API ($_) - using generic 'latest' redirect URL as fallback"
-                $rdUrl = 'https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-x86_64.exe'
-            }
-
-            Write-Host "    Downloading RustDesk..." -ForegroundColor Gray
-            Invoke-WebRequest -Uri $rdUrl -OutFile $rdInstaller -UseBasicParsing
-
-            Write-Host "    Installing RustDesk silently (this also installs its Windows service)..." -ForegroundColor Gray
-            Start-Process -FilePath $rdInstaller -ArgumentList '--silent-install' -Wait -NoNewWindow
-            Remove-Item $rdInstaller -ErrorAction SilentlyContinue
-
-            Start-Sleep -Seconds 5
-            if (Test-Path $rdExePath) { Write-Ok "RustDesk installed/upgraded" }
-            else { Write-Warn "RustDesk installer ran but executable not found at expected path" }
-        }
-
-        # The RustDesk service (running as LocalService) keeps its own config under
-        # ServiceProfiles, separate from any interactive user's %APPDATA%. We write
-        # the config file DIRECTLY to the service profile path rather than calling
-        # "rustdesk.exe --config" which routes through IPC to whichever process is
-        # currently alive and may write to the interactive user's profile instead.
-        if (Test-Path $rdExePath) {
-            Write-Host "    Applying server + password configuration..." -ForegroundColor Gray
-
-            $serviceConfigDir = "C:\Windows\ServiceProfiles\LocalService\AppData\Roaming\RustDesk\config"
-            $serviceConfigPath = Join-Path $serviceConfigDir 'RustDesk2.toml'
-
-            $alreadyCorrect = $false
-            if (Test-Path $serviceConfigPath) {
-                $existing = Get-Content $serviceConfigPath -Raw -ErrorAction SilentlyContinue
-                if ($existing -and $existing -match [regex]::Escape($rdServerAddr) -and $existing -match [regex]::Escape($rdKey)) {
-                    $alreadyCorrect = $true
-                }
-            }
-
-            if ($alreadyCorrect) {
-                Write-Ok "RustDesk already configured for this server ($rdServerAddr) - skipping reconfiguration"
-            } else {
-                # Write directly to the service profile config directory - no live process contacted.
-                # This is the same reliable approach used by the admin isolator script (Case 2).
-                New-Item -ItemType Directory -Path $serviceConfigDir -Force | Out-Null
-                $configContent = @"
-rendezvous_server = '${rdServerAddr}:21116'
-nat_type = 1
-serial = 0
-
-[options]
-custom-rendezvous-server = '$rdServerAddr'
-relay-server = '$rdServerAddr'
-key = '$rdKey'
-always-use-relay = 'Y'
-"@
-                Set-Content -Path $serviceConfigPath -Value $configContent -Encoding ASCII
-
-                # Restart RustDesk service so it reads the new config immediately
-                Write-Host "    Restarting RustDesk service to apply new config..." -ForegroundColor Gray
-                Restart-Service rustdesk -ErrorAction SilentlyContinue
-                Start-Sleep -Seconds 3
-
-                Write-Ok "RustDesk service config updated (written directly to service profile)"
-            }
-
-            # Also set the fixed password via the service's IPC now that it's running
-            # with the correct server config.
-            & $rdExePath --password $rdPassword 2>$null
-            Start-Sleep -Seconds 1
-
-            Write-Host "    Server: $rdServerAddr" -ForegroundColor Gray
-
-            # --get-id reads the ID directly from the running RustDesk instance at the
-            # moment we ask for it - this is the official, reliable way to retrieve it
-            # (RustDesk's own ID field is encrypted at rest in its config file, so reading
-            # the config file later cannot recover it). We capture it now and save it to
-            # a plain text file the agent service can read on every heartbeat.
-            #
-            # IMPORTANT: on some Windows builds, --get-id produces NO output when its
-            # stdout is captured through a PowerShell pipeline (a known RustDesk bug -
-            # see rustdesk/rustdesk#5309 and glpi-agent#659). Redirecting stdout directly
-            # to a file via cmd.exe bypasses this and reliably captures the output.
-            Write-Host "    Retrieving RustDesk ID..." -ForegroundColor Gray
-            Start-Sleep -Seconds 2
-
-            $rdIdTempFile = Join-Path $env:TEMP 'rustdesk-id-raw.txt'
-            Remove-Item $rdIdTempFile -ErrorAction SilentlyContinue
-            Start-Process -FilePath $rdExePath -ArgumentList '--get-id' `
-                -RedirectStandardOutput $rdIdTempFile -NoNewWindow -Wait -ErrorAction SilentlyContinue
-            Start-Sleep -Milliseconds 500
-
-            $rdId = ''
-            if (Test-Path $rdIdTempFile) {
-                $rdId = (Get-Content $rdIdTempFile -Raw -ErrorAction SilentlyContinue) -replace '\s', ''
-                Remove-Item $rdIdTempFile -ErrorAction SilentlyContinue
-            }
-
-            if ($rdId -match '^\d{6,}$') {
-                Set-Content -Path (Join-Path $InstallPath 'rustdesk-id.txt') -Value $rdId -Encoding ASCII -NoNewline
-                Write-Ok "RustDesk ID captured: $rdId"
-            } else {
-                Write-Warn "Could not retrieve RustDesk ID via --get-id (got: '$rdId')"
-                Write-Host "    This can happen on first install before RustDesk fully starts." -ForegroundColor Gray
-                Write-Host "      Re-run this installer once more, or check manually with:" -ForegroundColor Gray
-                Write-Host "      Start-Process '$rdExePath' -ArgumentList '--get-id' -RedirectStandardOutput out.txt -Wait; Get-Content out.txt" -ForegroundColor Gray
-            }
-        }
-    }
+    Write-Host "    RDP is now enabled. Guacamole will connect using the credentials" -ForegroundColor Gray
+    Write-Host "    configured per institution in the dashboard." -ForegroundColor Gray
 } catch {
-    Write-Warn "RustDesk setup failed (non-fatal): $_"
-    Write-Host "    Device monitoring will continue to work normally." -ForegroundColor Gray
+    Write-Warn "RDP setup failed (non-fatal): $_"
+    Write-Host "    You can enable Remote Desktop manually via System Properties > Remote." -ForegroundColor Gray
 }
 
 # ======================================================================
@@ -441,7 +290,7 @@ Write-Host "  Service name:  $ServiceName"
 Write-Host "  Service user:  .\$ServiceUser"
 Write-Host "  Logs:          $InstallPath\logs\"
 Write-Host "  Config:        $InstallPath\appsettings.local.json"
-Write-Host "  Remote desktop: RustDesk configured (ID visible in dashboard after first heartbeat)"
+Write-Host "  Remote desktop: RDP enabled for web-based remote access via Guacamole"
 Write-Host ""
 Write-Host "  Manage:" -ForegroundColor Gray
 Write-Host "    Stop:    Stop-Service $ServiceName"

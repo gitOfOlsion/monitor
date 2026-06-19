@@ -5,6 +5,7 @@
 @inject ServerApiClient Api
 @inject RealtimeService Realtime
 @inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
 
 <PageTitle>Dashboard</PageTitle>
 
@@ -37,7 +38,7 @@
                     <div class="pm-agent-name">@Icon(a.Platform) @a.MachineName</div>
                     <div class="pm-agent-meta">@a.IPAddress</div>
                     <div class="pm-agent-devices">@a.DeviceCount devices</div>
-                    <div class="pm-agent-heartbeat">@(a.LastHeartbeat?.ToLocalTime().ToString("HH:mm:ss") ?? "—")</div>
+                    <div class="pm-agent-heartbeat">@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value, "HH:mm:ss") : "—")</div>
                 </div>
             }
         </div>
@@ -53,7 +54,7 @@
         @foreach (var ev in _events.Take(100))
         {
             <div class="pm-event-row pm-event-@ev.EventType.ToLower()">
-                <span class="pm-event-time">@ev.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span>
+                <span class="pm-event-time">@Fmt(ev.Timestamp, "HH:mm:ss")</span>
                 <span class="pm-event-machine">@ev.MachineName</span>
                 <span class="pm-badge pm-badge-@ev.EventType.ToLower()">@ev.EventType</span>
                 <span class="pm-event-name">@ev.FriendlyName</span>
@@ -68,8 +69,23 @@
 @code {
     private List<AgentDto>             _agents = [];
     private List<DeviceChangedPayload> _events = [];
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
 
     private bool IsConnected => Realtime.State == Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected;
+
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
