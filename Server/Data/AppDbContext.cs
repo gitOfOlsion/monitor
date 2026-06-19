@@ -24,6 +24,11 @@ public class InstitutionEntity
     public string?  LogoUrl      { get; set; }
     public DateTime CreatedAt    { get; set; } = DateTime.UtcNow;
 
+    // RDP credentials for Guacamole remote desktop (AES-encrypted at rest)
+    public string?  RdpUsername        { get; set; }  // domain\user or user@domain
+    public string?  RdpPasswordEncrypted { get; set; }
+    public string?  RdpDomain          { get; set; }
+
     public ICollection<AppUser>     Users  { get; set; } = [];
     public ICollection<AgentEntity> Agents { get; set; } = [];
 }
@@ -58,7 +63,7 @@ public class AgentEntity
     public DateTime? LastHeartbeat { get; set; }
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
-    public string?   RustDeskId    { get; set; }
+    public string?   LoggedInUser  { get; set; }  // current Windows/Linux user session
 
     public InstitutionEntity    Institution { get; set; } = null!;
     public AgentTemplateEntity? Template    { get; set; }

@@ -20,7 +20,7 @@ public record HeartbeatPayload(
     string        Platform,       // "Windows" or "Linux"
     DateTime      Timestamp,
     int           DeviceCount,
-    string?       RustDeskId = null // null/empty if RustDesk not installed or ID not yet generated
+    string?       LoggedInUser = null // currently logged-in user, null if none/unknown
 );
 
 public record DeviceChangedPayload(
@@ -124,7 +124,7 @@ public class AgentDto
     public DateTime? LastHeartbeat  { get; set; }
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
-    public string?   RustDeskId    { get; set; }
+    public string?   LoggedInUser  { get; set; }
     // Nested institution info (populated when Server includes it)
     public InstitutionDto? Institution { get; set; }
 }
@@ -213,6 +213,17 @@ public record CreateAuditRequest(
     string  Target,
     string? Details,
     string? IpAddress
+);
+
+// ── Guacamole remote desktop ────────────────────────────────────────────────
+public record SetRdpCredentialsRequest(
+    string Username,   // domain\user or user@domain
+    string Password,
+    string? Domain     // optional AD domain
+);
+
+public record RdpConnectionResponse(
+    string GuacamoleUrl  // pre-built URL to open directly in a new tab
 );
 
 // ── File share DTOs (API response shapes) ──────────────────────────────────

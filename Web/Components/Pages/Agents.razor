@@ -5,6 +5,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject TimeZoneService TZ
 
 <PageTitle>Agents</PageTitle>
 
@@ -12,39 +13,6 @@
     <h1>Agents</h1>
     <button class="pm-btn pm-btn-secondary" @onclick="LoadAsync">↻ Refresh</button>
 </div>
-
-@if (_canCommand && _showRustDeskBanner)
-{
-    <div class="pm-alert pm-alert-info">
-        <strong>🖥️ First time using Remote Desktop?</strong>
-        Your own RustDesk client needs to be pointed at this server once, otherwise
-        "Remote Desktop" links will silently fail to connect (they'll try the public
-        RustDesk network, a different relay, or fail with "Key mismatch").
-        <div style="margin-top:.5rem">
-            <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/windows">⬇ Windows setup script</a>
-            <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/api/download/rustdesk-setup/linux">⬇ Linux setup script</a>
-            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => _showRustDeskBanner = false">Dismiss</button>
-        </div>
-        @if (_rdInfoKeyConfigured)
-        {
-            <p style="margin-top:.5rem;font-size:12px;color:var(--text-muted)">
-                Download the script above — it has your server address and key pre-filled.
-                Run it once as Administrator/root:<br />
-                <code>powershell -ExecutionPolicy Bypass -File .\configure-admin-rustdesk.ps1</code> (Windows)<br />
-                or <code>sudo bash configure-admin-rustdesk.sh</code> (Linux).
-                This only configures your own client — it does not touch any agent machine.
-            </p>
-        }
-        else
-        {
-            <p style="margin-top:.5rem;font-size:12px;color:var(--danger)">
-                ⚠ RustDesk server key is not configured yet (RUSTDESK_KEY in .env). Every connection
-                will fail with "Key mismatch" until this is set. Get the key with
-                <code>docker exec pm_hbbs cat id_ed25519.pub</code> on the server, add it to .env, and restart.
-            </p>
-        }
-    </div>
-}
 
 @if (_loading)
 { <div class="pm-loading">Loading…</div> }
@@ -60,7 +28,7 @@ else
             <table class="pm-table">
                 <thead><tr>
                     <th>Machine</th><th>Platform</th><th>IP</th><th>MAC</th>
-                    <th>Status</th><th>Last Heartbeat</th><th>Devices</th><th>Actions</th>
+                    <th>👤 Logged In</th><th>Status</th><th>Last Heartbeat</th><th>Devices</th><th>Actions</th>
                 </tr></thead>
                 <tbody>
                     @foreach (var a in group)
@@ -70,8 +38,9 @@ else
                             <td>@Icon(a.Platform) @a.Platform</td>
                             <td>@a.IPAddress</td>
                             <td><code>@a.MacAddress</code></td>
+                            <td class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
                             <td><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
-                            <td>@(a.LastHeartbeat?.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss") ?? "Never")</td>
+                            <td>@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
                             <td>@a.DeviceCount</td>
                             <td class="pm-actions">
                                 @if (a.Status == "Pending")
@@ -85,10 +54,7 @@ else
                                     <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => OpenFiles(a)" title="Shared files">📁 Files</button>
                                     @if (_canCommand)
                                     {
-                                        @if (!string.IsNullOrEmpty(a.RustDeskId))
-                                        {
-                                            <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via RustDesk">🖥️ Remote Desktop</button>
-                                        }
+                                        <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via browser">🖥️ Remote Desktop</button>
                                         <button class="pm-btn pm-btn-warning pm-btn-sm" @onclick="@(() => OpenCommand(a, "Restart"))" title="Restart machine">🔄 Restart</button>
                                         <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="@(() => OpenCommand(a, "Shutdown"))" title="Shutdown machine">⏻ Shutdown</button>
                                         <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel pending shutdown/restart">🛑 Cancel</button>
@@ -164,38 +130,6 @@ else
     </div>
 }
 
-@if (_rdAgent != null)
-{
-    <div class="pm-modal-overlay" @onclick="CloseRd">
-        <div class="pm-modal" @onclick:stopPropagation>
-            <h2>🖥️ Remote Desktop — @_rdAgent.MachineName</h2>
-            <p class="pm-modal-hint">
-                Use "Try to connect" if your RustDesk client points at this server's relay
-                directly. Use "Try isolated copy" if you ran the admin setup script and it
-                created a separate isolated copy (because your main RustDesk already had a
-                different relay configured) — that button launches the isolated copy directly
-                with the ID and password pre-filled. If neither opens a session, copy the
-                ID and password below into your RustDesk client manually.
-            </p>
-
-            <div class="pm-field">
-                <label>RustDesk ID</label>
-                <input class="pm-input pm-mono" readonly value="@_rdId" />
-            </div>
-            <div class="pm-field">
-                <label>Password</label>
-                <input class="pm-input pm-mono" readonly value="@_rdPassword" />
-            </div>
-
-            <div class="pm-modal-actions">
-                <button class="pm-btn pm-btn-secondary" @onclick="CloseRd">Close</button>
-                <button class="pm-btn pm-btn-secondary" @onclick="TryIsolatedConnect">📦 Try isolated copy</button>
-                <button class="pm-btn pm-btn-primary" @onclick="TryAutoConnect">🚀 Try to connect</button>
-            </div>
-        </div>
-    </div>
-}
-
 @if (_filesAgent != null)
 {
     <div class="pm-modal-overlay" @onclick="CloseFiles">
@@ -235,7 +169,7 @@ else
                                 <tr>
                                     <td>@f.Name</td>
                                     <td>@FormatSize(f.SizeBytes)</td>
-                                    <td>@f.ModifiedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    <td>@Fmt(f.ModifiedAt)</td>
                                     <td class="pm-actions">
                                         <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => DownloadFileAsync(f.Name)" disabled="@_filesDownloading">
                                             ⬇ Download
@@ -262,14 +196,21 @@ else
     private List<AgentDto> _agents = [];
     private bool _loading = true;
     private bool _canCommand;
-    private bool _showRustDeskBanner = true;
-    private string? _rdInfoServerAddr, _rdInfoKey;
-    private bool _rdInfoKeyConfigured;
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
 
-    // Remote desktop modal state
-    private AgentDto? _rdAgent;
-    private string? _rdId, _rdPassword, _rdUri, _rdIsolatedUri;
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
 
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
     // Command modal state
     private AgentDto? _cmdAgent;
     private string _cmdType = "Restart";
@@ -286,11 +227,6 @@ else
         var auth = await AuthState.GetAuthenticationStateAsync();
         var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
         _canCommand = role is "SuperAdmin" or "InstitutionAdmin";
-        if (_canCommand)
-        {
-            var (addr, key, configured) = await Api.GetRustDeskInfoAsync();
-            _rdInfoServerAddr = addr; _rdInfoKey = key; _rdInfoKeyConfigured = configured;
-        }
         await LoadAsync();
     }
 
@@ -302,26 +238,15 @@ else
 
     private async Task ConnectRemoteDesktop(AgentDto agent)
     {
-        var (ok, rustDeskId, password, uri, isolatedUri, err) = await Api.GetRemoteDesktopLinkAsync(agent.Id);
-        if (!ok)
+        var (ok, url, protocol, err) = await Api.GetRemoteDesktopUrlAsync(agent.Id);
+        if (!ok || url == null)
         {
             Toast(err ?? "Remote desktop unavailable for this machine.", true);
             return;
         }
-        _rdAgent = agent; _rdId = rustDeskId; _rdPassword = password; _rdUri = uri; _rdIsolatedUri = isolatedUri;
+        // Open Guacamole in a new browser tab — no client install needed, pure HTTPS
+        await JS.InvokeVoidAsync("open", url, "_blank");
     }
-
-    private async Task TryAutoConnect()
-    {
-        if (_rdUri != null) await JS.InvokeVoidAsync("pmOpenExternalLink", _rdUri);
-    }
-
-    private async Task TryIsolatedConnect()
-    {
-        if (_rdIsolatedUri != null) await JS.InvokeVoidAsync("pmOpenExternalLink", _rdIsolatedUri);
-    }
-
-    private void CloseRd() { _rdAgent = null; _rdId = null; _rdPassword = null; _rdUri = null; _rdIsolatedUri = null; }
 
     private void OpenCommand(AgentDto agent, string type)
     {

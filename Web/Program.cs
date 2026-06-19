@@ -27,6 +27,7 @@ try
     var serverUrl = builder.Configuration["ServerApiUrl"] ?? "http://server:5000";
     builder.Services.AddHttpClient<ServerApiClient>(c => c.BaseAddress = new Uri(serverUrl));
     builder.Services.AddScoped<RealtimeService>();
+    builder.Services.AddScoped<TimeZoneService>();
 
     var app = builder.Build();
 

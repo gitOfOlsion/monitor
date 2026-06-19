@@ -18,12 +18,19 @@ public class MonitorHub : Hub
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
         _log.LogDebug("Heartbeat: {Machine} inst={Inst} devices={N}", p.MachineName, p.InstitutionId, p.DeviceCount);
-        var agentId = await _agents.UpdateHeartbeatAsync(p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount, p.RustDeskId);
+        var (agentId, userEvent) = await _agents.UpdateHeartbeatAsync(p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount, p.LoggedInUser);
         if (agentId != Guid.Empty)
             _connections.Register(agentId, Context.ConnectionId);
 
         await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnAgentHeartbeat", p);
         await Clients.Group("superadmin").SendAsync("OnAgentHeartbeat", p);
+
+        // Broadcast login/logout events to dashboards in real time
+        if (userEvent != null)
+        {
+            await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnDeviceChanged", userEvent);
+            await Clients.Group("superadmin").SendAsync("OnDeviceChanged", userEvent);
+        }
     }
 
     public async Task DeviceChanged(DeviceChangedPayload p)

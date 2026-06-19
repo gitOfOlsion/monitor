@@ -13,7 +13,6 @@ public class AgentWorker : BackgroundService
     private readonly DiscoveryService _discovery;
     private readonly CommandExecutor  _commands;
     private readonly FileShareService _files;
-    private readonly RustDeskService  _rustdesk;
     private readonly IConfiguration   _config;
     private readonly ILogger<AgentWorker> _log;
 
@@ -22,8 +21,43 @@ public class AgentWorker : BackgroundService
     private readonly AgentPlatform _platform    = OperatingSystem.IsWindows() ? AgentPlatform.Windows : AgentPlatform.Linux;
     private Guid _institutionId = Guid.Empty;
 
-    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, RustDeskService rustdesk, ILogger<AgentWorker> l)
-    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _rustdesk = rustdesk; _log = l; }
+    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, ILogger<AgentWorker> l)
+    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _log = l; }
+
+    /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
+    private static string? GetLoggedInUser()
+    {
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                // Query WMI for the active console session user
+                using var searcher = new System.Management.ManagementObjectSearcher(
+                    "SELECT UserName FROM Win32_ComputerSystem");
+                foreach (var obj in searcher.Get())
+                {
+                    var user = obj["UserName"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(user)) return user;
+                }
+            }
+            else
+            {
+                // Linux: ask 'who' for console/tty sessions
+                var psi = new System.Diagnostics.ProcessStartInfo("who")
+                { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc != null)
+                {
+                    var output = proc.StandardOutput.ReadToEnd();
+                    proc.WaitForExit();
+                    var line = output.Split('\n').FirstOrDefault(l => l.Contains(":0") || l.Contains("tty"));
+                    if (line != null) return line.Split(' ')[0];
+                }
+            }
+        }
+        catch { /* non-fatal */ }
+        return null;
+    }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -64,10 +98,10 @@ public class AgentWorker : BackgroundService
                 if (_hub?.State == HubConnectionState.Connected)
                 {
                     var snap = await _monitor.GetSnapshotAsync();
-                    var rustDeskId = _rustdesk.GetId();
+                    var loggedInUser = GetLoggedInUser();
                     await _hub.SendAsync("AgentHeartbeat",
-                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count, rustDeskId), ct);
-                    _log.LogDebug("Heartbeat — {N} devices, RustDesk={Rd}", snap.Count, rustDeskId ?? "none");
+                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count, loggedInUser), ct);
+                    _log.LogDebug("Heartbeat — {N} devices, User={User}", snap.Count, loggedInUser ?? "none");
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)
                     try { await _hub.StartAsync(ct); } catch { }

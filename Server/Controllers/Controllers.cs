@@ -195,13 +195,12 @@ public class AgentsController : ScopedController
     }
 
     /// <summary>
-    /// Returns a rustdesk:// URI for connecting to this agent's machine.
-    /// Requires RustDesk to be installed (done automatically by the agent installer)
-    /// and the agent to have reported its RustDesk ID via heartbeat.
-    /// Viewers cannot retrieve this (it includes the shared connection password).
+    /// Generate a Guacamole connection URL for web-based RDP/VNC/SSH access to this agent.
+    /// Credentials are stored per institution (set via PUT /api/institutions/{id}/rdp-credentials).
+    /// Viewers cannot use this endpoint.
     /// </summary>
     [HttpGet("{id:guid}/remote-desktop")]
-    public async Task<IActionResult> GetRemoteDesktopLink(Guid id)
+    public async Task<IActionResult> GetRemoteDesktopUrl(Guid id)
     {
         var c = Caller();
         if (c.Role == "Viewer") return Forbid();
@@ -209,24 +208,22 @@ public class AgentsController : ScopedController
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
 
-        if (string.IsNullOrEmpty(agent.RustDeskId))
-            return NotFound(new { error = "RustDesk ID not available yet. The agent may still be starting RustDesk, or RustDesk could not be installed on this machine (e.g. headless server)." });
+        // Look up RDP credentials for this agent's institution
+        var creds = await _svc.GetRdpCredentialsAsync(agent.InstitutionId);
+        if (creds == null)
+            return NotFound(new { error = "No RDP credentials configured for this institution. Go to Institutions → Set RDP Credentials." });
 
-        var password = _config["RustDesk:Password"] ?? "";
-        var uri = $"rustdesk://connect/{agent.RustDeskId}?password={Uri.EscapeDataString(password)}";
-        // Alternate link for admins who ran the isolated-copy setup (configure-admin-rustdesk.ps1
-        // Case 2) - their main RustDesk install owns the standard "rustdesk://" handler and is
-        // configured for a DIFFERENT relay, so a "rustdesk-pm://" link instead reaches the isolated
-        // copy that IS configured for this server.
-        // Note: isolatedUri uses a literal "|" separator (not URL-escaped) since the
-        // batch handler does simple string splitting, not URI percent-decoding.
-        // Base64 passwords can contain '/' and '+' which would collide with a '/'-based
-        // split or get mangled by percent-encoding round-trips through cmd.exe.
-        var isolatedUri = $"rustdesk-pm://{agent.RustDeskId}|{password}";
+        var guacSecret = _config["GuacamoleSecret"] ?? "";
+        if (string.IsNullOrEmpty(guacSecret))
+            return StatusCode(500, new { error = "GUACAMOLE_SECRET is not configured in .env" });
 
-        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, null, c.Ip);
+        // Build a Guacamole connection token — signed so only our server can generate valid ones
+        var protocol = agent.Platform == "Linux" ? "vnc" : "rdp";
+        var token = GuacamoleTokenBuilder.Build(guacSecret, agent.IPAddress, protocol, creds.Username, creds.Password, creds.Domain);
+        var url = $"/remote/#/client/{token}";
 
-        return Ok(new { rustDeskId = agent.RustDeskId, password, uri, isolatedUri });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, protocol, c.Ip);
+        return Ok(new { url, protocol });
     }
 }
 public record PushFileRequest(string FileName, string Base64Content);
@@ -278,6 +275,39 @@ public class InstitutionsController : ScopedController
         var c = Caller();
         if (!c.IsSuperAdmin && c.InstitutionId != id) return Forbid();
         return Ok(new { token = await _svc.GenerateProvisionTokenAsync(id, templateId) });
+    }
+
+    /// <summary>
+    /// Set or update RDP credentials for an institution (used by Guacamole for web-based remote desktop).
+    /// SuperAdmin can set credentials for any institution; InstitutionAdmin only for their own.
+    /// Credentials are stored AES-256 encrypted using GUACAMOLE_SECRET as the key.
+    /// </summary>
+    [HttpPut("{id:guid}/rdp-credentials")]
+    public async Task<IActionResult> SetRdpCredentials(Guid id, [FromBody] SetRdpCredentialsRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+        if (!c.IsSuperAdmin && c.InstitutionId != id) return Forbid();
+
+        var ok = await _svc.SetRdpCredentialsAsync(id, req.Username, req.Password, req.Domain, c.Scope);
+        if (!ok) return NotFound(new { error = "Institution not found" });
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "institution.rdp-credentials.set",
+            id.ToString(), $"username={req.Username}", c.Ip);
+        return Ok(new { message = "RDP credentials saved" });
+    }
+
+    /// <summary>Check whether RDP credentials are configured (returns username only, never the password).</summary>
+    [HttpGet("{id:guid}/rdp-credentials")]
+    public async Task<IActionResult> GetRdpCredentials(Guid id)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+        if (!c.IsSuperAdmin && c.InstitutionId != id) return Forbid();
+
+        var creds = await _svc.GetRdpCredentialsAsync(id);
+        if (creds == null) return Ok(new { configured = false });
+        return Ok(new { configured = true, username = creds.Value.Username, domain = creds.Value.Domain });
     }
 }
 public record CreateInstRequest(string Name, string Type, string ContactEmail);
@@ -414,67 +444,8 @@ public class DownloadController : ScopedController
         linux   = _packages.IsPackageAvailable("linux")
     });
 
-    /// <summary>
-    /// Returns this deployment's RustDesk server address and public key, so admins
-    /// can run configure-admin-rustdesk.ps1/.sh with the exact values needed.
-    /// Viewers cannot see this (it's setup info, not needed for read-only use).
-    /// </summary>
-    [HttpGet("rustdesk-info")]
-    public IActionResult GetRustDeskInfo()
-    {
-        var c = Caller();
-        if (c.Role == "Viewer") return Forbid();
-
-        var addr = _config["RustDesk:ServerAddr"] ?? "";
-        var key  = _config["RustDesk:Key"] ?? "";
-        return Ok(new { serverAddr = addr, key, keyConfigured = !string.IsNullOrEmpty(key) });
-    }
-
-    /// <summary>
-    /// Download a pre-filled RustDesk configurator script for admins — ServerAddr and Key
-    /// are baked in so the admin just double-clicks (Windows) or runs with sudo (Linux),
-    /// no parameters needed. Generated on demand from current server config.
-    /// </summary>
-    [HttpGet("rustdesk-setup/{platform}")]
-    public IActionResult DownloadRustDeskSetup(string platform)
-    {
-        platform = platform.ToLowerInvariant();
-        if (platform != "windows" && platform != "linux")
-            return BadRequest(new { error = "Platform must be 'windows' or 'linux'" });
-
-        var addr = _config["RustDesk:ServerAddr"] ?? "";
-        var key  = _config["RustDesk:Key"] ?? "";
-
-        if (string.IsNullOrEmpty(addr) || string.IsNullOrEmpty(key))
-            return BadRequest(new { error = "RUSTDESK_KEY or PUBLIC_IP is not configured in .env. Set them and restart the server." });
-
-        if (platform == "windows")
-        {
-            var scriptPath = Path.Combine("/app/agent-packages/installers", "configure-admin-rustdesk.ps1");
-            if (!System.IO.File.Exists(scriptPath))
-                return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
-
-            var original = System.IO.File.ReadAllText(scriptPath);
-            // Inject the values right after the param() block by replacing the empty defaults.
-            // The script's param() block uses empty string defaults; the server pre-fills them
-            // so the admin can just run the script with no arguments.
-            var prefilled = original
-                .Replace("[string]$ServerAddr = \"\"", $"[string]$ServerAddr = \"{addr}\"")
-                .Replace("[string]$Key = \"\"", $"[string]$Key = \"{key}\"");
-            return File(System.Text.Encoding.ASCII.GetBytes(prefilled), "text/plain", "configure-admin-rustdesk.ps1");
-        }
-        else
-        {
-            var scriptPath = Path.Combine("/app/agent-packages/installers", "configure-admin-rustdesk.sh");
-            if (!System.IO.File.Exists(scriptPath))
-                return NotFound(new { error = "Configurator script not found. Rebuild the server image." });
-
-            var original = System.IO.File.ReadAllText(scriptPath);
-            // Replace the positional argument reads with hardcoded values.
-            var prefilled = original
-                .Replace(@"SERVER_ADDR=""${1:-}""", $"SERVER_ADDR='{addr}'")
-                .Replace(@"RD_KEY=""${2:-}""", $"RD_KEY='{key}'");
-            return File(System.Text.Encoding.UTF8.GetBytes(prefilled), "text/plain", "configure-admin-rustdesk.sh");
-        }
-    }
 }
+
+// ── Supporting request/response records ────────────────────────────────────
+public record PushFileRequest(string FileName, string Base64Content);
+public record SendCommandRequest(string Type, int? DelaySeconds);

@@ -281,153 +281,58 @@ UNIT
 systemctl daemon-reload
 ok "Systemd unit created: ${SERVICE_NAME}.service"
 
-# ══════════════════════════════════════════════════════════════════════════
-# STEP 7: Install and configure RustDesk (remote desktop)
-# ══════════════════════════════════════════════════════════════════════════
 
 # ══════════════════════════════════════════════════════════════════════════
-# STEP 7: Install and configure RustDesk (remote desktop)
-# ══════════════════════════════════════════════════════════════════════════
-# Checklist (same pattern as the .NET runtime check above):
-#   1. Is RustDesk installed at all?            -> if not, download + install
-#   2. Is the installed version recent enough?  -> if not, upgrade
-#   3. Is it already pointed at OUR server?      -> if not, reconfigure
-#      (always re-check config, even if already installed, in case it was
-#       previously configured for a different relay/server)
+# STEP 7: Enable remote desktop access (for Guacamole web-based access)
 # ══════════════════════════════════════════════════════════════════════════
 
-step "Checking RustDesk (remote desktop)..."
+step "Configuring remote desktop access..."
 
-RD_MIN_VERSION="1.2.0"
-
-RD_SERVER_ADDR=""
-RD_PASSWORD=""
-RD_KEY=""
-if [[ -f "$INSTALL_DIR/appsettings.local.json" ]]; then
-    RD_SERVER_ADDR=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"ServerAddr"\s*:\s*"\K[^"]*' || true)
-    RD_PASSWORD=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Password"\s*:\s*"\K[^"]*' || true)
-    RD_KEY=$(grep -A3 '"RustDesk"' "$INSTALL_DIR/appsettings.local.json" | grep -oP '"Key"\s*:\s*"\K[^"]*' || true)
-fi
-
-version_ge() {
-    # returns 0 (true) if $1 >= $2
-    [[ "$1" == "$2" ]] && return 0
-    [[ "$(printf '%s\n%s' "$1" "$2" | sort -V | head -n1)" == "$2" ]]
-}
-
-if [[ -z "$RD_SERVER_ADDR" ]]; then
-    warn "No RustDesk server configured in appsettings.local.json — skipping remote desktop setup"
-elif [[ -z "$RD_KEY" ]]; then
-    warn "No RustDesk server key configured — skipping remote desktop setup"
-    echo "    (the server admin needs to set RUSTDESK_KEY in .env - see docker-compose.yml comments)"
-elif ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d /usr/share/xsessions ]]; then
-    warn "No graphical desktop environment detected — RustDesk requires a GUI session, skipping"
-    echo "    Device monitoring will continue to work normally on this headless machine."
+if ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d /usr/share/xsessions ]]; then
+    warn "No graphical desktop detected — installing SSH-only access (headless server)"
+    # Ensure SSH is running for terminal-only Guacamole access
+    if command -v systemctl &>/dev/null; then
+        systemctl enable ssh 2>/dev/null || systemctl enable openssh-server 2>/dev/null || true
+        systemctl start  ssh 2>/dev/null || systemctl start  openssh-server 2>/dev/null || true
+    fi
+    ok "SSH enabled for headless remote access via Guacamole"
 else
-    RD_INSTALLED=false
-    RD_NEEDS_UPGRADE=false
+    # Desktop machine — install x11vnc for Guacamole VNC access
+    echo "    Desktop environment detected — setting up VNC (x11vnc)..."
 
-    if command -v rustdesk &>/dev/null; then
-        RD_INSTALLED=true
-        RD_CURRENT_VERSION=$(rustdesk --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "0.0.0")
-        if version_ge "$RD_CURRENT_VERSION" "$RD_MIN_VERSION"; then
-            ok "RustDesk $RD_CURRENT_VERSION already installed (meets minimum $RD_MIN_VERSION)"
-        else
-            warn "RustDesk $RD_CURRENT_VERSION is older than required $RD_MIN_VERSION — will upgrade"
-            RD_NEEDS_UPGRADE=true
-        fi
-    else
-        warn "RustDesk not found — will install"
-    fi
+    case "$PKG_MGR" in
+        apt)
+            apt-get install -y -qq x11vnc 2>/dev/null && ok "x11vnc installed" || warn "x11vnc install failed"
+            ;;
+        yum|dnf)
+            $PKG_MGR install -y x11vnc 2>/dev/null && ok "x11vnc installed" || warn "x11vnc install failed"
+            ;;
+        *)
+            warn "Unsupported package manager — install x11vnc manually for VNC access"
+            ;;
+    esac
 
-    if [[ "$RD_INSTALLED" == false || "$RD_NEEDS_UPGRADE" == true ]]; then
-        ARCH=$(dpkg --print-architecture 2>/dev/null || echo "amd64")
+    if command -v x11vnc &>/dev/null; then
+        # Create systemd service for x11vnc that starts when a display is available
+        cat > /etc/systemd/system/pm-x11vnc.service << VNCSERVICE
+[Unit]
+Description=Peripheral Monitor x11vnc (VNC for Guacamole)
+After=display-manager.service network.target
+Wants=display-manager.service
 
-        echo "    Resolving latest RustDesk release..."
-        RD_API_JSON=$(curl -fsSL -H "User-Agent: PeripheralMonitor-Agent" \
-            "https://api.github.com/repos/rustdesk/rustdesk/releases/latest" 2>/dev/null || true)
+[Service]
+Type=simple
+ExecStart=/usr/bin/x11vnc -display :0 -auth guess -forever -loop -noxdamage -repeat -rfbport 5900 -shared -capslock
+Restart=on-failure
+RestartSec=5
 
-        RD_URL=""
-        if [[ -n "$RD_API_JSON" ]]; then
-            RD_URL=$(echo "$RD_API_JSON" | grep -oP "\"browser_download_url\":\s*\"\K[^\"]*rustdesk-[\d.]+-${ARCH}\.deb" | head -1 || true)
-        fi
-
-        if [[ -z "$RD_URL" ]]; then
-            warn "Could not resolve latest release via GitHub API - using generic 'latest' redirect URL as fallback"
-            RD_URL="https://github.com/rustdesk/rustdesk/releases/latest/download/rustdesk-${ARCH}.deb"
-        else
-            echo "    Found: $(basename "$RD_URL")"
-        fi
-
-        echo "    Downloading RustDesk..."
-        RD_DEB="/tmp/rustdesk.deb"
-
-        if wget -q "$RD_URL" -O "$RD_DEB" 2>/dev/null && [[ -s "$RD_DEB" ]]; then
-            case "$PKG_MGR" in
-                apt)
-                    apt-get install -y -qq "$RD_DEB" || { dpkg -i "$RD_DEB" && apt-get install -f -y -qq; }
-                    ;;
-                *)
-                    warn "Automatic install only supported on Debian/Ubuntu (.deb). Download manually: $RD_URL"
-                    ;;
-            esac
-            rm -f "$RD_DEB"
-        else
-            warn "Could not download RustDesk from $RD_URL — skipping"
-        fi
-
-        if command -v rustdesk &>/dev/null; then ok "RustDesk installed/upgraded"; fi
-    fi
-
-    if command -v rustdesk &>/dev/null; then
-        # Always re-check config — RustDesk may have been previously installed
-        # and pointed at a different relay (public servers, or another deployment).
-        RD_CONFIG_PATH="/root/.config/rustdesk/RustDesk2.toml"
-        RD_ALREADY_CORRECT=false
-        if [[ -f "$RD_CONFIG_PATH" ]] && grep -q "$RD_SERVER_ADDR" "$RD_CONFIG_PATH" 2>/dev/null && grep -q "$RD_KEY" "$RD_CONFIG_PATH" 2>/dev/null; then
-            RD_ALREADY_CORRECT=true
-        fi
-
-        if [[ "$RD_ALREADY_CORRECT" == true ]]; then
-            ok "RustDesk already configured for this server ($RD_SERVER_ADDR) — skipping reconfiguration"
-        else
-            echo "    Applying server + password configuration..."
-            # hbbs always enforces key matching - there's no "disable" option - so the
-            # real server public key (RUSTDESK_KEY in .env) must be used here.
-            rustdesk --config "host=$RD_SERVER_ADDR,key=$RD_KEY" 2>/dev/null || true
-            rustdesk --password "$RD_PASSWORD" 2>/dev/null || true
-            ok "RustDesk reconfigured for this server (was previously pointed elsewhere, or freshly installed)"
-        fi
-
-        # RustDesk's own config stores the ID encrypted at rest with no documented way
-        # to decrypt it externally. The only reliable way to retrieve it is asking the
-        # running instance directly via --get-id (the official RustDesk deployment
-        # pattern), capturing it once here into a plain text file the agent service reads.
-        echo "    Retrieving RustDesk ID..."
-        sleep 2
-        RD_ID=$(rustdesk --get-id 2>/dev/null | tail -1 | tr -d '[:space:]')
-        if [[ "$RD_ID" =~ ^[0-9]{6,}$ ]]; then
-            echo -n "$RD_ID" > "$INSTALL_DIR/rustdesk-id.txt"
-            ok "RustDesk ID captured: $RD_ID"
-        else
-            warn "Could not retrieve RustDesk ID via --get-id (got: '$RD_ID')"
-            echo "    This can happen on first install before RustDesk fully starts."
-            echo "    Re-run this installer once more, or check manually with: rustdesk --get-id"
-        fi
-
-        # Auto-start RustDesk for any desktop user via XDG autostart
-        mkdir -p /etc/xdg/autostart
-        cat > /etc/xdg/autostart/rustdesk.desktop << AUTOSTART
-[Desktop Entry]
-Type=Application
-Name=RustDesk
-Exec=rustdesk --tray
-Icon=rustdesk
-Terminal=false
-X-GNOME-Autostart-enabled=true
-AUTOSTART
-        ok "RustDesk configured (server: $RD_SERVER_ADDR), autostart enabled for desktop sessions"
-        echo "    The agent reports this machine's RustDesk ID to the dashboard on its next heartbeat."
+[Install]
+WantedBy=multi-user.target
+VNCSERVICE
+        systemctl daemon-reload
+        systemctl enable pm-x11vnc.service 2>/dev/null || true
+        systemctl start  pm-x11vnc.service 2>/dev/null || true
+        ok "x11vnc VNC service enabled (port 5900)"
     fi
 fi
 
@@ -466,7 +371,7 @@ echo "  Service user:  $SERVICE_USER"
 echo "  Logs:          $INSTALL_DIR/logs/"
 echo "  Config:        $INSTALL_DIR/appsettings.local.json"
 echo "  udev rules:    /etc/udev/rules.d/99-peripheral-monitor.rules"
-echo "  Remote desktop: RustDesk configured (ID visible in dashboard after first heartbeat)"
+echo "  Remote desktop: RDP enabled for web-based remote access via Guacamole"
 echo ""
 echo "  Manage:"
 echo "    Status:  systemctl status $SERVICE_NAME"

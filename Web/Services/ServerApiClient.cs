@@ -165,31 +165,39 @@ public class ServerApiClient
         return (await r.Content.ReadAsByteArrayAsync(), null);
     }
 
-    public async Task<(bool ok, string? rustDeskId, string? password, string? uri, string? isolatedUri, string? error)> GetRemoteDesktopLinkAsync(Guid agentId)
+    // ── Remote desktop (Guacamole) ───────────────────────────────────────────
+    public async Task<(bool ok, string? url, string? protocol, string? error)> GetRemoteDesktopUrlAsync(Guid agentId)
     {
         AttachIdentity();
         var r = await _http.GetAsync($"/api/agents/{agentId}/remote-desktop");
         if (!r.IsSuccessStatusCode)
         {
             var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
-            return (false, null, null, null, null, err?.Error ?? "Remote desktop unavailable");
+            return (false, null, null, err?.Error ?? "Remote desktop unavailable");
         }
         var body = await r.Content.ReadFromJsonAsync<RemoteDesktopResponse>();
-        return (true, body?.RustDeskId, body?.Password, body?.Uri, body?.IsolatedUri, null);
+        return (true, body?.Url, body?.Protocol, null);
     }
 
-    private record RemoteDesktopResponse(string RustDeskId, string Password, string Uri, string IsolatedUri);
-
-    public async Task<(string? serverAddr, string? key, bool keyConfigured)> GetRustDeskInfoAsync()
+    public async Task<(bool configured, string? username, string? domain)> GetRdpCredentialStatusAsync(Guid institutionId)
     {
         AttachIdentity();
-        var r = await _http.GetAsync("/api/download/rustdesk-info");
-        if (!r.IsSuccessStatusCode) return (null, null, false);
-        var body = await r.Content.ReadFromJsonAsync<RustDeskInfoResponse>();
-        return (body?.ServerAddr, body?.Key, body?.KeyConfigured ?? false);
+        var r = await _http.GetAsync($"/api/institutions/{institutionId}/rdp-credentials");
+        if (!r.IsSuccessStatusCode) return (false, null, null);
+        var body = await r.Content.ReadFromJsonAsync<RdpCredentialStatusResponse>();
+        return (body?.Configured ?? false, body?.Username, body?.Domain);
     }
 
-    private record RustDeskInfoResponse(string ServerAddr, string Key, bool KeyConfigured);
+    public async Task<bool> SetRdpCredentialsAsync(Guid institutionId, string username, string password, string? domain)
+    {
+        AttachIdentity();
+        var r = await _http.PutAsJsonAsync($"/api/institutions/{institutionId}/rdp-credentials",
+            new { username, password, domain });
+        return r.IsSuccessStatusCode;
+    }
+
+    private record RemoteDesktopResponse(string Url, string Protocol);
+    private record RdpCredentialStatusResponse(bool Configured, string? Username, string? Domain);
 
     private record FileListResponse(string? FolderPath, List<SharedFileDto> Files);
 

@@ -91,7 +91,8 @@ public class AgentService
         return a;
     }
 
-    public async Task<Guid> UpdateHeartbeatAsync(string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count, string? rustDeskId = null)
+    public async Task<(Guid agentId, DeviceChangedPayload? loginEvent)> UpdateHeartbeatAsync(
+        string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count, string? loggedInUser = null)
     {
         await using var db = await _db.CreateDbContextAsync();
         var a = await db.Agents.FirstOrDefaultAsync(x => x.MachineName == machineName && x.InstitutionId == institutionId);
@@ -100,7 +101,7 @@ public class AgentService
         if (a == null)
         {
             if (!await db.Institutions.AnyAsync(i => i.Id == institutionId))
-                return Guid.Empty;
+                return (Guid.Empty, null);
 
             a = new AgentEntity
             {
@@ -125,15 +126,39 @@ public class AgentService
         if (a.MacAddress == "unknown" && !string.IsNullOrEmpty(macAddress) && macAddress != "unknown")
             a.MacAddress = macAddress;
 
-        // RustDesk ID is generated once by the client on first run, then stable — only update if changed/newly known.
-        if (!string.IsNullOrEmpty(rustDeskId) && a.RustDeskId != rustDeskId)
-            a.RustDeskId = rustDeskId;
+        // Detect login/logout events by comparing previous vs current user
+        DeviceChangedPayload? userEvent = null;
+        var prevUser = a.LoggedInUser;
+        if (loggedInUser != prevUser)
+        {
+            a.LoggedInUser = loggedInUser;
+            if (!string.IsNullOrEmpty(loggedInUser) && string.IsNullOrEmpty(prevUser))
+            {
+                // User logged in
+                userEvent = new DeviceChangedPayload(machineName, institutionId, "Connected",
+                    "user-session", loggedInUser, "UserSession", "Active", ts);
+            }
+            else if (string.IsNullOrEmpty(loggedInUser) && !string.IsNullOrEmpty(prevUser))
+            {
+                // User logged out
+                userEvent = new DeviceChangedPayload(machineName, institutionId, "Disconnected",
+                    "user-session", prevUser!, "UserSession", "Ended", ts);
+            }
+            else if (!string.IsNullOrEmpty(loggedInUser) && !string.IsNullOrEmpty(prevUser))
+            {
+                // User switched (logout + login)
+                userEvent = new DeviceChangedPayload(machineName, institutionId, "Connected",
+                    "user-session", loggedInUser, "UserSession", "Switched", ts);
+            }
+            // Persist the login/logout event
+            if (userEvent != null) await RecordDeviceEventAsync(userEvent);
+        }
 
         a.LastHeartbeat = ts;
         a.DeviceCount   = count;
         a.Status        = "Approved";
         await db.SaveChangesAsync();
-        return a.Id;
+        return (a.Id, userEvent);
     }
 
     public async Task RecordDeviceEventAsync(DeviceChangedPayload p)
@@ -237,4 +262,28 @@ public class AgentService
             System.Text.RegularExpressions.Regex.Replace(
                 name.ToLowerInvariant().Replace(" ", "-"), @"[^a-z0-9\-]", ""),
             @"-+", "-").Trim('-');
+
+    // ── RDP Credentials (stored encrypted per institution) ─────────────────
+    public async Task<(string Username, string Password, string? Domain)?> GetRdpCredentialsAsync(Guid institutionId)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var inst = await db.Institutions.FindAsync(institutionId);
+        if (inst == null || string.IsNullOrEmpty(inst.RdpUsername) || string.IsNullOrEmpty(inst.RdpPasswordEncrypted))
+            return null;
+        var decrypted = CredentialEncryption.Decrypt(inst.RdpPasswordEncrypted);
+        return (inst.RdpUsername, decrypted, inst.RdpDomain);
+    }
+
+    public async Task<bool> SetRdpCredentialsAsync(Guid institutionId, string username, string password, string? domain, Guid? callerInst)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var inst = await db.Institutions.FindAsync(institutionId);
+        if (inst == null) return false;
+        if (callerInst.HasValue && inst.Id != callerInst.Value) return false;
+        inst.RdpUsername          = username;
+        inst.RdpPasswordEncrypted = CredentialEncryption.Encrypt(password);
+        inst.RdpDomain            = domain;
+        await db.SaveChangesAsync();
+        return true;
+    }
 }
