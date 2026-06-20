@@ -445,7 +445,3 @@ public class DownloadController : ScopedController
     });
 
 }
-
-// ── Supporting request/response records ────────────────────────────────────
-public record PushFileRequest(string FileName, string Base64Content);
-public record SendCommandRequest(string Type, int? DelaySeconds);
