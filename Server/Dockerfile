@@ -53,9 +53,6 @@ COPY Agent/Installers/install.ps1 /app/agent-packages/installers/install.ps1
 COPY Agent/Installers/install.bat /app/agent-packages/installers/install.bat
 COPY Agent/Installers/install.sh  /app/agent-packages/installers/install.sh
 
-# Copy admin-side RustDesk configurator scripts (one-time setup, separate from agent install)
-COPY Agent/Installers/configure-admin-rustdesk.ps1 /app/agent-packages/installers/configure-admin-rustdesk.ps1
-COPY Agent/Installers/configure-admin-rustdesk.sh  /app/agent-packages/installers/configure-admin-rustdesk.sh
 
 EXPOSE 5000
 ENTRYPOINT ["dotnet", "PeripheralMonitor.Server.dll"]
