@@ -1,4 +1,4 @@
-#version: "3.9"
+version: "3.9"
 
 # ── Single version variable — matches Directory.Build.props DotNetVersion ──
 x-dotnet-version: &dotnet-version "10.0"
