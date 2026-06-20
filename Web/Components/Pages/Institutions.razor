@@ -76,6 +76,53 @@
     </div>
 }
 
+@if (_rdpInst != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseRdpCredentials">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>🔑 RDP Credentials — @_rdpInst.Name</h2>
+            <p class="pm-modal-hint">
+                These credentials are used by Guacamole to connect to every Windows machine
+                in this institution via Remote Desktop. Use a domain account with RDP rights
+                on these machines (no Active Directory policy changes needed). The password
+                is stored encrypted and is never shown again after saving.
+            </p>
+
+            @if (_rdpConfigured)
+            {
+                <div class="pm-alert pm-alert-success" style="margin-bottom:1rem">
+                    ✓ Configured — username: <strong>@_rdpExistingUsername</strong>
+                    @if (!string.IsNullOrEmpty(_rdpExistingDomain)) { <text> (domain: @_rdpExistingDomain)</text> }
+                </div>
+            }
+
+            <div class="pm-field">
+                <label>Username</label>
+                <input class="pm-input" @bind="_rdpUsername" placeholder="jdoe or jdoe@university.edu" />
+            </div>
+            <div class="pm-field">
+                <label>Password</label>
+                <input class="pm-input" type="password" @bind="_rdpPassword" placeholder="@(_rdpConfigured ? "Re-enter password to update" : "Enter password")" />
+            </div>
+            <div class="pm-field">
+                <label>Domain (optional)</label>
+                <input class="pm-input" @bind="_rdpDomain" placeholder="UNIVERSITY (leave blank if not using AD domain)" />
+            </div>
+
+            @if (_rdpError != null)
+            { <div class="pm-alert pm-alert-error">@_rdpError</div> }
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseRdpCredentials">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="SaveRdpCredentialsAsync"
+                        disabled="@(_rdpSaving || string.IsNullOrWhiteSpace(_rdpUsername) || string.IsNullOrWhiteSpace(_rdpPassword))">
+                    @(_rdpSaving ? "Saving…" : "Save Credentials")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @if (_loading)
 { <div class="pm-loading">Loading…</div> }
 else
@@ -98,6 +145,10 @@ else
                             <button class="pm-btn pm-btn-primary pm-btn-sm"
                                     @onclick="() => ShowDownloads(i)">
                                 📦 Download Agent
+                            </button>
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm"
+                                    @onclick="() => OpenRdpCredentials(i)">
+                                🔑 RDP Credentials
                             </button>
                         </td>
                     </tr>
@@ -141,6 +192,12 @@ else
     private string? _message;
     private bool _isError;
 
+    // RDP credentials modal state
+    private InstitutionDto? _rdpInst;
+    private string _rdpUsername = "", _rdpPassword = "", _rdpDomain = "";
+    private bool _rdpConfigured, _rdpSaving;
+    private string? _rdpExistingUsername, _rdpExistingDomain, _rdpError;
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -171,6 +228,49 @@ else
 
     private string GetDownloadUrl(string platform) =>
         $"/api/download/{_showToken?.Id}/{platform}";
+
+    private async Task OpenRdpCredentials(InstitutionDto inst)
+    {
+        _rdpInst = inst;
+        _rdpUsername = _rdpPassword = _rdpDomain = "";
+        _rdpError = null;
+        var (configured, username, domain) = await Api.GetRdpCredentialStatusAsync(inst.Id);
+        _rdpConfigured = configured;
+        _rdpExistingUsername = username;
+        _rdpExistingDomain = domain;
+        if (configured)
+        {
+            _rdpUsername = username ?? "";
+            _rdpDomain = domain ?? "";
+        }
+    }
+
+    private void CloseRdpCredentials()
+    {
+        _rdpInst = null;
+        _rdpError = null;
+    }
+
+    private async Task SaveRdpCredentialsAsync()
+    {
+        if (_rdpInst == null || string.IsNullOrWhiteSpace(_rdpPassword)) return;
+        _rdpSaving = true;
+        _rdpError = null;
+
+        var ok = await Api.SetRdpCredentialsAsync(_rdpInst.Id, _rdpUsername, _rdpPassword,
+            string.IsNullOrWhiteSpace(_rdpDomain) ? null : _rdpDomain);
+
+        _rdpSaving = false;
+        if (ok)
+        {
+            Toast("RDP credentials saved.", false);
+            CloseRdpCredentials();
+        }
+        else
+        {
+            _rdpError = "Failed to save credentials. Check your permissions and try again.";
+        }
+    }
 
     private string GetManualJson() => $$"""
         {
