@@ -219,7 +219,7 @@ public class AgentsController : ScopedController
 
         // Build a Guacamole connection token — signed so only our server can generate valid ones
         var protocol = agent.Platform == "Linux" ? "vnc" : "rdp";
-        var token = GuacamoleTokenBuilder.Build(guacSecret, agent.IPAddress, protocol, creds.Username, creds.Password, creds.Domain);
+        var token = GuacamoleTokenBuilder.Build(guacSecret, agent.IPAddress, protocol, creds.Value.Username, creds.Value.Password, creds.Value.Domain);
         var url = $"/remote/#/client/{token}";
 
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, protocol, c.Ip);
