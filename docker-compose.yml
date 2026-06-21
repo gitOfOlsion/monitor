@@ -1,4 +1,4 @@
-#version: "3.9"
+version: "3.9"
 
 # ── Single version variable — matches Directory.Build.props DotNetVersion ──
 x-dotnet-version: &dotnet-version "10.0"
@@ -53,6 +53,7 @@ services:
       SuperAdminPassword:               ${SUPER_ADMIN_PASSWORD}
       PublicUrl:                        ${PUBLIC_URL:-http://localhost}
       GuacamoleSecret:                  ${GUACAMOLE_SECRET}
+      GuacamoleJsonKey:                 ${GUACAMOLE_JSON_KEY}
       Seq__Url:                         http://seq:5341
     networks: [internal]
     expose: ["5000"]
@@ -102,15 +103,14 @@ services:
     image: guacamole/guacamole:latest
     container_name: pm_guacamole
     restart: unless-stopped
-    depends_on: [guacd, db]
+    depends_on: [guacd]
     environment:
       GUACD_HOSTNAME:    guacd
       GUACD_PORT:        4822
-      POSTGRESQL_HOSTNAME: db
-      POSTGRESQL_PORT:     5432
-      POSTGRESQL_DATABASE: peripheral_monitor
-      POSTGRESQL_USERNAME: pm_user
-      POSTGRESQL_PASSWORD: ${DB_PASSWORD}
+      # JSON auth lets our server generate signed, encrypted, ephemeral connection
+      # tokens - NO Guacamole user database needed, no login screen, no admin user.
+      # JSON_SECRET_KEY must be exactly 32 hex digits (128 bits).
+      JSON_SECRET_KEY:   ${GUACAMOLE_JSON_KEY}
       GUACAMOLE_HOME:    /guacamole-home
     volumes:
       - ./Guacamole:/guacamole-home:ro
