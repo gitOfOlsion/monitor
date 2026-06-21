@@ -5,7 +5,7 @@
 
     # Blazor Server dashboard (default)
     @web {
-        not path /api/* /monitor /monitor/* /health /seq/*
+        not path /api/* /monitor /monitor/* /health /seq/* /remote/*
     }
     handle @web {
         reverse_proxy web:5001
@@ -26,7 +26,11 @@
     }
 
     # Guacamole remote desktop gateway
+    # Guacamole's WAR deploys at the /guacamole context path (not root), so we strip
+    # our /remote prefix and rewrite to /guacamole before proxying.
     handle /remote/* {
+        uri strip_prefix /remote
+        rewrite * /guacamole{uri}
         reverse_proxy guacamole:8080
     }
 
