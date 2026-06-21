@@ -29,6 +29,9 @@ public class AgentConnectionRegistry
     public string? GetConnectionId(Guid agentId) =>
         _agentToConnection.TryGetValue(agentId, out var c) ? c : null;
 
+    public Guid? GetAgentIdForConnection(string connectionId) =>
+        _connectionToAgent.TryGetValue(connectionId, out var id) ? id : null;
+
     public bool IsOnline(Guid agentId) => _agentToConnection.ContainsKey(agentId);
 
     /// <summary>

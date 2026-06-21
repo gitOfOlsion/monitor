@@ -38,11 +38,12 @@ public class AgentsController : ScopedController
     private readonly AgentService _svc;
     private readonly AuditService _audit;
     private readonly AgentConnectionRegistry _connections;
+    private readonly TunnelManager _tunnels;
     private readonly IHubContext<MonitorHub> _hub;
     private readonly IConfiguration _config;
 
-    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, IHubContext<MonitorHub> hub, IConfiguration config)
-    { _svc = svc; _audit = audit; _connections = connections; _hub = hub; _config = config; }
+    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config)
+    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
@@ -195,7 +196,11 @@ public class AgentsController : ScopedController
     }
 
     /// <summary>
-    /// Generate a Guacamole connection URL for web-based RDP/VNC/SSH access to this agent.
+    /// Generate a Guacamole connection URL for web-based RDP/VNC access to this agent.
+    /// Since agent machines are typically behind NAT/firewalls with no inbound access,
+    /// this first opens a tunnel through the agent's existing outbound SignalR connection
+    /// (see TunnelManager) so Guacamole connects to a local port on THIS server, which
+    /// relays bytes to the agent's local RDP/VNC port.
     /// Credentials are stored per institution (set via PUT /api/institutions/{id}/rdp-credentials).
     /// Viewers cannot use this endpoint.
     /// </summary>
@@ -208,6 +213,9 @@ public class AgentsController : ScopedController
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
 
+        if (!_connections.IsOnline(id))
+            return NotFound(new { error = "Agent is offline — cannot open a remote desktop tunnel." });
+
         // Look up RDP credentials for this agent's institution
         var creds = await _svc.GetRdpCredentialsAsync(agent.InstitutionId);
         if (creds == null)
@@ -217,9 +225,20 @@ public class AgentsController : ScopedController
         if (string.IsNullOrEmpty(guacSecret))
             return StatusCode(500, new { error = "GUACAMOLE_SECRET is not configured in .env" });
 
-        // Build a Guacamole connection token — signed so only our server can generate valid ones
         var protocol = agent.Platform == "Linux" ? "vnc" : "rdp";
-        var token = GuacamoleTokenBuilder.Build(guacSecret, agent.IPAddress, protocol, creds.Value.Username, creds.Value.Password, creds.Value.Domain);
+        var targetPort = protocol == "rdp" ? 3389 : 5900;
+
+        // Open the tunnel: agent connects to its own local RDP/VNC port and relays bytes
+        // back to a port we open here on the VPS, which Guacamole then connects to.
+        var localPort = await _tunnels.StartTunnelAsync(id, targetPort, TimeSpan.FromMinutes(15));
+        if (localPort == null)
+            return StatusCode(503, new { error = "Could not establish a tunnel to the agent. It may have just gone offline." });
+
+        // Guacamole runs in its own container, so "this server" from Guacamole's point of
+        // view is reached via the Docker network — the tunnel listener binds to all
+        // interfaces inside this container, and Guacamole's guacd reaches it via the
+        // server container's hostname on the internal Docker network.
+        var token = GuacamoleTokenBuilder.Build(guacSecret, "server", protocol, creds.Value.Username, creds.Value.Password, creds.Value.Domain, localPort.Value);
         var url = $"/remote/#/client/{token}";
 
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, protocol, c.Ip);
