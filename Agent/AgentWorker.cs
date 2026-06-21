@@ -13,6 +13,7 @@ public class AgentWorker : BackgroundService
     private readonly DiscoveryService _discovery;
     private readonly CommandExecutor  _commands;
     private readonly FileShareService _files;
+    private readonly TunnelClient     _tunnel;
     private readonly IConfiguration   _config;
     private readonly ILogger<AgentWorker> _log;
 
@@ -21,8 +22,8 @@ public class AgentWorker : BackgroundService
     private readonly AgentPlatform _platform    = OperatingSystem.IsWindows() ? AgentPlatform.Windows : AgentPlatform.Linux;
     private Guid _institutionId = Guid.Empty;
 
-    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, ILogger<AgentWorker> l)
-    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _log = l; }
+    public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, TunnelClient tunnel, ILogger<AgentWorker> l)
+    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; }
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     private static string? GetLoggedInUser()
@@ -207,6 +208,25 @@ public class AgentWorker : BackgroundService
             var listing = _files.ListFiles(commandId);
             try { await _hub!.SendAsync("SharedFolderListing", listing); }
             catch (Exception ex) { _log.LogWarning(ex, "Failed to send folder listing"); }
+        });
+
+        // Remote desktop tunnel: server asks us to connect to our own local RDP/VNC port
+        // and relay bytes both directions, since this machine likely has no inbound access.
+        _hub.On<string, int>("StartTunnel", async (sessionId, targetPort) =>
+        {
+            _log.LogInformation("Starting remote desktop tunnel {Session} -> local port {Port}", sessionId, targetPort);
+            await _tunnel.StartAsync(_hub!, sessionId, targetPort);
+        });
+
+        _hub.On<string>("StopTunnel", sessionId =>
+        {
+            _log.LogInformation("Stopping remote desktop tunnel {Session}", sessionId);
+            _tunnel.Stop();
+        });
+
+        _hub.On<string, byte[]>("TunnelData", async (sessionId, data) =>
+        {
+            await _tunnel.OnServerDataAsync(sessionId, data);
         });
     }
 

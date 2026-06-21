@@ -12,7 +12,7 @@
     <PackageReference Include="Serilog.Enrichers.Environment"                   Version="$(SerilogEnvVersion)" />
   </ItemGroup>
 
-  <!-- Exclude platform-specific source files when cross-compiling 
+  <!-- Exclude platform-specific source files when cross-compiling
   <ItemGroup Condition="'$(RuntimeIdentifier)' == 'linux-x64' OR '$(RuntimeIdentifier)' == 'linux-arm64'">
     <Compile Remove="WindowsDeviceMonitor.cs" />
   </ItemGroup>

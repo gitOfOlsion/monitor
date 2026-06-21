@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.SignalR;
 using PeripheralMonitor.Server.Hubs;
 using PeripheralMonitor.Server.Services;
 using PeripheralMonitor.Shared.Models;
+using System.Text;
+using System.Text.Json;
+using System.Net.Http.Json;
 
 namespace PeripheralMonitor.Server.Controllers;
 
@@ -41,9 +44,10 @@ public class AgentsController : ScopedController
     private readonly TunnelManager _tunnels;
     private readonly IHubContext<MonitorHub> _hub;
     private readonly IConfiguration _config;
+    private readonly IHttpClientFactory _httpFactory;
 
-    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config)
-    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; }
+    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config, IHttpClientFactory httpFactory)
+    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; _httpFactory = httpFactory; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
@@ -197,6 +201,11 @@ public class AgentsController : ScopedController
 
     /// <summary>
     /// Generate a Guacamole connection URL for web-based RDP/VNC access to this agent.
+    /// Uses Guacamole's guacamole-auth-json extension: we build a signed+encrypted JSON
+    /// payload describing the connection, POST it to Guacamole's /api/tokens to get a
+    /// real session token, then build the client URL using that token + the connection's
+    /// identifier (base64 of "name\0c\0json"). No Guacamole login, no user database.
+    ///
     /// Since agent machines are typically behind NAT/firewalls with no inbound access,
     /// this first opens a tunnel through the agent's existing outbound SignalR connection
     /// (see TunnelManager) so Guacamole connects to a local port on THIS server, which
@@ -216,14 +225,13 @@ public class AgentsController : ScopedController
         if (!_connections.IsOnline(id))
             return NotFound(new { error = "Agent is offline — cannot open a remote desktop tunnel." });
 
-        // Look up RDP credentials for this agent's institution
         var creds = await _svc.GetRdpCredentialsAsync(agent.InstitutionId);
         if (creds == null)
             return NotFound(new { error = "No RDP credentials configured for this institution. Go to Institutions → Set RDP Credentials." });
 
-        var guacSecret = _config["GuacamoleSecret"] ?? "";
-        if (string.IsNullOrEmpty(guacSecret))
-            return StatusCode(500, new { error = "GUACAMOLE_SECRET is not configured in .env" });
+        var jsonKey = _config["GuacamoleJsonKey"] ?? "";
+        if (string.IsNullOrEmpty(jsonKey))
+            return StatusCode(500, new { error = "GUACAMOLE_JSON_KEY is not configured in .env" });
 
         var protocol = agent.Platform == "Linux" ? "vnc" : "rdp";
         var targetPort = protocol == "rdp" ? 3389 : 5900;
@@ -234,12 +242,37 @@ public class AgentsController : ScopedController
         if (localPort == null)
             return StatusCode(503, new { error = "Could not establish a tunnel to the agent. It may have just gone offline." });
 
-        // Guacamole runs in its own container, so "this server" from Guacamole's point of
-        // view is reached via the Docker network — the tunnel listener binds to all
-        // interfaces inside this container, and Guacamole's guacd reaches it via the
-        // server container's hostname on the internal Docker network.
-        var token = GuacamoleTokenBuilder.Build(guacSecret, "server", protocol, creds.Value.Username, creds.Value.Password, creds.Value.Domain, localPort.Value);
-        var url = $"/remote/#/client/{token}";
+        // "server" = this container's Docker-internal hostname, reachable by guacd
+        // on the shared "internal" network. The tunnel listener binds to all interfaces.
+        const string connectionName = "session";
+        var payload = GuacamoleTokenBuilder.BuildEncryptedPayload(
+            jsonKey, connectionName, protocol, "server", localPort.Value,
+            creds.Value.Username, creds.Value.Password, creds.Value.Domain, TimeSpan.FromMinutes(20));
+
+        // POST to Guacamole's /api/tokens to exchange our signed payload for a real session token
+        var http = _httpFactory.CreateClient();
+        var tokenResp = await http.PostAsync("http://guacamole:8080/guacamole/api/tokens",
+            new FormUrlEncodedContent(new Dictionary<string, string> { ["data"] = payload }));
+
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            await _tunnels.StopTunnelAsync(id);
+            return StatusCode(502, new { error = $"Guacamole rejected the connection token (HTTP {(int)tokenResp.StatusCode})." });
+        }
+
+        var tokenJson = await tokenResp.Content.ReadFromJsonAsync<JsonElement>();
+        var authToken = tokenJson.GetProperty("authToken").GetString();
+        if (string.IsNullOrEmpty(authToken))
+        {
+            await _tunnels.StopTunnelAsync(id);
+            return StatusCode(502, new { error = "Guacamole did not return an authToken." });
+        }
+
+        // Build the client identifier: base64 of "connectionName\0c\0json" (NULL-separated)
+        var idBytes = Encoding.UTF8.GetBytes($"{connectionName}\0c\0json");
+        var clientId = Convert.ToBase64String(idBytes);
+
+        var url = $"/remote/#/client/{clientId}?token={authToken}";
 
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.remote-desktop.connect", agent.MachineName, protocol, c.Ip);
         return Ok(new { url, protocol });
