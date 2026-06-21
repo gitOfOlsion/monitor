@@ -75,6 +75,7 @@ try
         p.AllowAnyMethod().AllowAnyHeader().SetIsOriginAllowed(_ => true).AllowCredentials()));
     builder.Services.AddScoped<AgentService>();
     builder.Services.AddSingleton<AgentConnectionRegistry>();
+    builder.Services.AddSingleton<TunnelManager>();
     builder.Services.AddScoped<UserService>();
     builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();

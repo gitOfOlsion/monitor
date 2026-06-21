@@ -10,10 +10,11 @@ public class MonitorHub : Hub
 {
     private readonly AgentService _agents;
     private readonly AgentConnectionRegistry _connections;
+    private readonly TunnelManager _tunnels;
     private readonly ILogger<MonitorHub> _log;
 
-    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, ILogger<MonitorHub> log)
-    { _agents = agents; _connections = connections; _log = log; }
+    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, TunnelManager tunnels, ILogger<MonitorHub> log)
+    { _agents = agents; _connections = connections; _tunnels = tunnels; _log = log; }
 
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
@@ -73,8 +74,22 @@ public class MonitorHub : Hub
             await Groups.AddToGroupAsync(Context.ConnectionId, InstGroup(id));
     }
 
+    /// <summary>
+    /// Agent forwards raw bytes from its local RDP/VNC connection back to Guacamole.
+    /// Part of the SignalR-tunneled remote desktop relay (see TunnelManager).
+    /// </summary>
+    public async Task TunnelDataFromAgent(string sessionId, byte[] data)
+    {
+        var agentId = _connections.GetAgentIdForConnection(Context.ConnectionId);
+        if (agentId.HasValue)
+            await _tunnels.OnAgentDataAsync(agentId.Value, data);
+    }
+
     public override Task OnDisconnectedAsync(Exception? exception)
     {
+        var agentId = _connections.GetAgentIdForConnection(Context.ConnectionId);
+        if (agentId.HasValue)
+            _ = _tunnels.StopTunnelAsync(agentId.Value);
         _connections.Unregister(Context.ConnectionId);
         return base.OnDisconnectedAsync(exception);
     }

@@ -37,6 +37,7 @@ try
             svc.AddSingleton<DiscoveryService>();
             svc.AddSingleton<CommandExecutor>();
             svc.AddSingleton<FileShareService>();
+            svc.AddSingleton<TunnelClient>();
 #if PLATFORM_WINDOWS
             svc.AddSingleton<IDeviceMonitor>(sp =>
                 new WindowsDeviceMonitor(sp.GetRequiredService<ILogger<WindowsDeviceMonitor>>()));
