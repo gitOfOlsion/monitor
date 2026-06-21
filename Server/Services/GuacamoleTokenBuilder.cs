@@ -51,7 +51,7 @@ public static class GuacamoleTokenBuilder
         if (protocol == "rdp")
         {
             if (!string.IsNullOrEmpty(domain)) parameters["domain"] = domain;
-            parameters["security"]              = "any";
+            parameters["security"]              = "nla";
             parameters["ignore-cert"]            = "true";
             parameters["enable-drive"]           = "false";
             parameters["create-drive-path"]      = "false";

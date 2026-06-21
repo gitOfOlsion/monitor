@@ -171,7 +171,11 @@ public class AgentService
         // (heartbeat auto-registers, next event will succeed)
         if (agent == null)
         {
-            _log.LogDebug("No agent record for {Machine} — skipping event (will register on next heartbeat)", p.MachineName);
+            _log.LogWarning("DROPPED event: no agent record found for MachineName={Machine} InstitutionId={Inst} (EventType={Type}, Device={Device}). " +
+                "This event will NOT appear in the dashboard. If this keeps happening for a machine that " +
+                "clearly has an agent installed, check for MachineName/InstitutionId mismatches between the " +
+                "heartbeat and device-change payloads.",
+                p.MachineName, p.InstitutionId, p.EventType, p.FriendlyName);
             return;
         }
 
