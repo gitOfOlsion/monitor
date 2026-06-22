@@ -1,0 +1,133 @@
+#version: "3.9"
+
+# ── Single version variable — matches Directory.Build.props DotNetVersion ──
+x-dotnet-version: &dotnet-version "10.0"
+
+services:
+
+  db:
+    image: postgres:17-alpine
+    container_name: pm_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       peripheral_monitor
+      POSTGRES_USER:     pm_user
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pm_user -d peripheral_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  seq:
+    image: datalust/seq:latest
+    container_name: pm_seq
+    restart: unless-stopped
+    environment:
+      ACCEPT_EULA: "Y"
+    volumes:
+      - seq_data:/data
+    expose: ["80", "5341"]
+    networks: [internal]
+
+  server:
+    build:
+      context: .
+      dockerfile: Server/Dockerfile
+      args:
+        DOTNET_VERSION: *dotnet-version
+    container_name: pm_server
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      seq:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT:           Production
+      ConnectionStrings__Postgres:      "Host=db;Port=5432;Database=peripheral_monitor;Username=pm_user;Password=${DB_PASSWORD}"
+      Jwt__Secret:                      ${JWT_SECRET}
+      SuperAdminPassword:               ${SUPER_ADMIN_PASSWORD}
+      PublicUrl:                        ${PUBLIC_URL:-http://localhost}
+      GuacamoleSecret:                  ${GUACAMOLE_SECRET}
+      GuacamoleJsonKey:                 ${GUACAMOLE_JSON_KEY}
+      Seq__Url:                         http://seq:5341
+    networks: [internal]
+    expose: ["5000"]
+    ports:
+      - "5001:5001/udp"   # UDP multicast discovery from LAN agents
+
+  web:
+    build:
+      context: .
+      dockerfile: Web/Dockerfile
+      args:
+        DOTNET_VERSION: *dotnet-version
+    container_name: pm_web
+    restart: unless-stopped
+    depends_on: [server, seq]
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ServerApiUrl:           http://server:5000
+      Seq__Url:               http://seq:5341
+    networks: [internal]
+    expose: ["5001"]
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: pm_caddy
+    restart: unless-stopped
+    depends_on: [web, server, seq]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [internal]
+
+  # ── Guacamole remote desktop gateway ─────────────────────────────────────
+  # guacd: protocol daemon (RDP/VNC/SSH backend)
+  # Built from a custom Dockerfile that adds libgssapi-krb5-2 (Kerberos/GSSAPI),
+  # which the official image is missing. Without it, FreeRDP cannot perform NLA
+  # authentication and Windows machines with UserAuthentication=1 refuse all connections.
+  guacd:
+    build:
+      context: .
+      dockerfile: Guacamole/guacd.Dockerfile
+    image: pm_guacd
+    container_name: pm_guacd
+    restart: unless-stopped
+    networks: [internal]
+
+  guacamole:
+    image: guacamole/guacamole:latest
+    container_name: pm_guacamole
+    restart: unless-stopped
+    depends_on: [guacd]
+    environment:
+      GUACD_HOSTNAME:    guacd
+      GUACD_PORT:        4822
+      # JSON auth lets our server generate signed, encrypted, ephemeral connection
+      # tokens - NO Guacamole user database needed, no login screen, no admin user.
+      # JSON_SECRET_KEY must be exactly 32 hex digits (128 bits).
+      JSON_SECRET_KEY:   ${GUACAMOLE_JSON_KEY}
+      GUACAMOLE_HOME:    /guacamole-home
+    volumes:
+      - ./Guacamole:/guacamole-home:ro
+    networks: [internal]
+    expose: ["8080"]
+
+volumes:
+  pg_data:
+  seq_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  internal:
+    driver: bridge
