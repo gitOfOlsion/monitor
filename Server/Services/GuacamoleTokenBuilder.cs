@@ -51,7 +51,10 @@ public static class GuacamoleTokenBuilder
         if (protocol == "rdp")
         {
             if (!string.IsNullOrEmpty(domain)) parameters["domain"] = domain;
-            parameters["security"]              = "nla";
+            // "any" lets FreeRDP negotiate the security mode with Windows.
+            // This results in NTLM-based NLA which works without Kerberos libs.
+            // Pure Kerberos NLA requires krb5 libs that aren't in the guacd image.
+            parameters["security"]              = "any";
             parameters["ignore-cert"]           = "true";
             parameters["enable-drive"]          = "false";
             parameters["create-drive-path"]     = "false";
