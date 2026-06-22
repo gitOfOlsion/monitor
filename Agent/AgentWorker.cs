@@ -38,10 +38,28 @@ public class AgentWorker : BackgroundService
         {
             if (OperatingSystem.IsWindows())
             {
-                // Query WMI for the active console session user
+                // Primary method: find the owner of the explorer.exe process, which
+                // is the most reliable way to identify the interactive user from a
+                // service context (Win32_ComputerSystem.UserName can return empty
+                // when queried from SYSTEM in certain session configurations).
                 using var searcher = new System.Management.ManagementObjectSearcher(
-                    "SELECT UserName FROM Win32_ComputerSystem");
+                    "SELECT Handle FROM Win32_Process WHERE Name='explorer.exe'");
                 foreach (var obj in searcher.Get())
+                {
+                    var args = new object[] { string.Empty, string.Empty };
+                    var ret = (uint)(obj.InvokeMethod("GetOwner", args) ?? 1u);
+                    if (ret == 0)
+                    {
+                        var domain = args[1]?.ToString();
+                        var user   = args[0]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(user))
+                            return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
+                    }
+                }
+                // Fallback: Win32_ComputerSystem.UserName (works in some configurations)
+                using var fallback = new System.Management.ManagementObjectSearcher(
+                    "SELECT UserName FROM Win32_ComputerSystem");
+                foreach (var obj in fallback.Get())
                 {
                     var user = obj["UserName"]?.ToString();
                     if (!string.IsNullOrWhiteSpace(user)) return user;
