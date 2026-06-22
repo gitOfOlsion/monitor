@@ -97,9 +97,28 @@ public class MonitorHub : Hub
     public override Task OnDisconnectedAsync(Exception? exception)
     {
         var agentId = _connections.GetAgentIdForConnection(Context.ConnectionId);
-        if (agentId.HasValue)
-            _ = _tunnels.StopTunnelAsync(agentId.Value);
         _connections.Unregister(Context.ConnectionId);
+
+        if (agentId.HasValue)
+        {
+            // Don't immediately tear down any active tunnel — the agent's SignalR connection
+            // can briefly drop during an RDP session startup (Windows reprioritizing network,
+            // VPN blip, etc.) and will reconnect within seconds. Give it a 20-second grace
+            // period before considering the tunnel dead. The tunnel's own idle-timeout and
+            // the guacd connection closure will clean up naturally if the agent doesn't return.
+            var capturedId = agentId.Value;
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromSeconds(20));
+                // Only stop the tunnel if the agent is STILL offline after the grace period
+                if (_connections.GetConnectionId(capturedId) == null)
+                {
+                    _log.LogInformation("Agent {Agent} still offline after 20s grace — stopping tunnel", capturedId);
+                    await _tunnels.StopTunnelAsync(capturedId);
+                }
+            });
+        }
+
         return base.OnDisconnectedAsync(exception);
     }
 

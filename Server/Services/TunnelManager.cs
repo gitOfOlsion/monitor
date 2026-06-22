@@ -123,19 +123,27 @@ public class TunnelManager
             using var client = await session.Listener.AcceptTcpClientAsync(session.Cts.Token);
             session.ClientStream = client.GetStream();
 
-            var connId = _connections.GetConnectionId(session.AgentId);
             var buffer = new byte[16 * 1024];
 
             while (!session.Cts.IsCancellationRequested)
             {
                 var read = await session.ClientStream.ReadAsync(buffer, session.Cts.Token);
-                if (read == 0) break;
+                if (read == 0) break; // Guacamole closed the connection
+
                 session.Touch();
 
+                // Re-resolve the connection ID on every iteration — the agent may have
+                // briefly disconnected and reconnected with a new SignalR connectionId.
+                var connId = _connections.GetConnectionId(session.AgentId);
                 if (connId != null)
                 {
                     var chunk = buffer[..read];
                     await _hub.Clients.Client(connId).SendAsync("TunnelData", session.SessionId, chunk);
+                }
+                else
+                {
+                    // Agent temporarily offline — wait briefly for reconnect before giving up
+                    await Task.Delay(500, session.Cts.Token);
                 }
             }
         }
