@@ -7,20 +7,20 @@ using PeripheralMonitor.Server.Hubs;
 namespace PeripheralMonitor.Server.Services;
 
 /// <summary>
-/// Bridges Guacamole (on this VPS) to an agent's local RDP/VNC port, even when the
-/// agent is behind NAT/firewall with no inbound access — by tunneling raw TCP bytes
-/// through the agent's existing outbound SignalR connection.
+/// Bridges Guacamole (on this VPS) to an agent's local RDP/VNC port via SignalR tunnel.
+///
+/// CRITICAL ORDERING: guacd must NOT connect to the tunnel port until the agent has
+/// connected to its local RDP port and is actively relaying — otherwise guacd reads
+/// an empty stream and immediately reports "wrong security type" (it never saw an
+/// RDP handshake response because the agent wasn't ready yet).
 ///
 /// Flow:
-///   1. StartTunnelAsync opens a local TCP listener on 127.0.0.1:{port} (Guacamole connects here)
-///   2. Sends "StartTunnel" to the agent via SignalR, telling it to connect to its own
-///      127.0.0.1:3389 (or :5900 for VNC) and start relaying
-///   3. Bytes arriving on the local listener are forwarded to the agent via "TunnelData"
-///   4. Bytes the agent sends back (its RDP server's responses) arrive via "TunnelData"
-///      from the agent and get written to the local TCP socket that Guacamole is reading
-///
-/// One tunnel per agent at a time (a second StartTunnelAsync call for the same agent
-/// replaces/tears down the previous one).
+///   1. Server opens a local TCP listener
+///   2. Sends "StartTunnel" to agent
+///   3. Agent connects to its own localhost:3389, then sends "TunnelReady" back to server
+///   4. ONLY THEN does StartTunnelAsync return the local port to the controller
+///   5. Controller builds the Guacamole token pointing at that port
+///   6. Guacamole/guacd connects and finds a live RDP handshake waiting to respond
 /// </summary>
 public class TunnelManager
 {
@@ -35,35 +35,55 @@ public class TunnelManager
         _hub = hub; _connections = connections; _log = log;
     }
 
-    /// <summary>Starts a new tunnel for the given agent. Returns the local port Guacamole should connect to.</summary>
+    /// <summary>
+    /// Starts a tunnel and WAITS for the agent to signal it is ready before returning.
+    /// This ensures guacd always finds a live RDP stream on the port, not an empty one.
+    /// Returns the local port Guacamole should connect to, or null on timeout/offline.
+    /// </summary>
     public async Task<int?> StartTunnelAsync(Guid agentId, int targetPort, TimeSpan idleTimeout)
     {
         var connId = _connections.GetConnectionId(agentId);
-        if (connId == null) return null; // agent offline
+        if (connId == null) return null;
 
-        // Tear down any existing tunnel for this agent first (one session at a time)
         await StopTunnelAsync(agentId);
 
-        // Bind to all interfaces (not loopback) - guacd runs in a SEPARATE container and
-        // reaches this listener via the "server" container's Docker-internal hostname,
-        // so loopback-only binding would make it unreachable from outside this container.
         var listener = new TcpListener(IPAddress.Any, 0);
         listener.Start();
         var localPort = ((IPEndPoint)listener.LocalEndpoint).Port;
 
-        var session = new TunnelSession(agentId, listener, idleTimeout);
+        // Completed by OnAgentReady() when agent signals its local RDP connection is live.
+        var readyTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new TunnelSession(agentId, listener, idleTimeout, readyTcs);
         _sessions[agentId] = session;
 
-        // Tell the agent to open its local RDP/VNC port and start relaying
         var sessionId = Guid.NewGuid().ToString("N");
         session.SessionId = sessionId;
+
         await _hub.Clients.Client(connId).SendAsync("StartTunnel", sessionId, targetPort);
 
-        // Accept the (single) Guacamole connection on the local listener in the background
+        // Wait up to 10 seconds for the agent to connect to its local RDP port and signal ready.
+        var completed = await Task.WhenAny(readyTcs.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        if (completed != readyTcs.Task || !readyTcs.Task.Result)
+        {
+            _log.LogWarning("Tunnel ready-timeout for agent {Agent} — agent did not connect to local port {Port} within 10s", agentId, targetPort);
+            await StopTunnelAsync(agentId);
+            return null;
+        }
+
         _ = AcceptLoopAsync(session);
 
         _log.LogInformation("Tunnel started for agent {Agent} -> local port {Port} -> target {TargetPort}", agentId, localPort, targetPort);
         return localPort;
+    }
+
+    /// <summary>Called by the hub when the agent signals its local RDP connection is live and ready to relay.</summary>
+    public void OnAgentReady(Guid agentId)
+    {
+        if (_sessions.TryGetValue(agentId, out var session))
+        {
+            _log.LogInformation("Tunnel agent-ready for {Agent} — local RDP connected, returning port to Guacamole", agentId);
+            session.ReadyTcs.TrySetResult(true);
+        }
     }
 
     public Task StopTunnelAsync(Guid agentId)
@@ -79,7 +99,7 @@ public class TunnelManager
         return Task.CompletedTask;
     }
 
-    /// <summary>Called by the hub when the agent sends tunnel data back (RDP server -> Guacamole direction).</summary>
+    /// <summary>Called by the hub when the agent sends tunnel data (RDP server -> Guacamole direction).</summary>
     public async Task OnAgentDataAsync(Guid agentId, byte[] data)
     {
         if (_sessions.TryGetValue(agentId, out var session) && session.ClientStream != null)
@@ -109,7 +129,7 @@ public class TunnelManager
             while (!session.Cts.IsCancellationRequested)
             {
                 var read = await session.ClientStream.ReadAsync(buffer, session.Cts.Token);
-                if (read == 0) break; // Guacamole closed the connection
+                if (read == 0) break;
                 session.Touch();
 
                 if (connId != null)
@@ -119,7 +139,7 @@ public class TunnelManager
                 }
             }
         }
-        catch (OperationCanceledException) { /* expected on teardown */ }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             _log.LogDebug(ex, "Tunnel accept loop ended for agent {Agent}", session.AgentId);
@@ -136,14 +156,16 @@ public class TunnelManager
         public TcpListener Listener { get; }
         public NetworkStream? ClientStream { get; set; }
         public string SessionId { get; set; } = "";
+        public TaskCompletionSource<bool> ReadyTcs { get; }
         public CancellationTokenSource Cts { get; } = new();
         private DateTime _lastActivity = DateTime.UtcNow;
         private readonly Timer _idleTimer;
 
-        public TunnelSession(Guid agentId, TcpListener listener, TimeSpan idleTimeout)
+        public TunnelSession(Guid agentId, TcpListener listener, TimeSpan idleTimeout, TaskCompletionSource<bool> readyTcs)
         {
             AgentId = agentId;
             Listener = listener;
+            ReadyTcs = readyTcs;
             _idleTimer = new Timer(_ =>
             {
                 if (DateTime.UtcNow - _lastActivity > idleTimeout)
@@ -155,10 +177,11 @@ public class TunnelManager
 
         public void Dispose()
         {
+            ReadyTcs.TrySetResult(false);
             Cts.Cancel();
             _idleTimer.Dispose();
             ClientStream?.Dispose();
-            try { Listener.Stop(); } catch { /* already stopped */ }
+            try { Listener.Stop(); } catch { }
         }
     }
 }
