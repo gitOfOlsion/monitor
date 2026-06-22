@@ -245,6 +245,11 @@ public class AgentsController : ScopedController
         // "server" = this container's Docker-internal hostname, reachable by guacd
         // on the shared "internal" network. The tunnel listener binds to all interfaces.
         const string connectionName = "session";
+
+        // Log exactly what we're sending to help diagnose auth/connection failures
+        _log.LogInformation("RDP tunnel: host=server:{Port} protocol={Protocol} user={User} domain={Domain}",
+            localPort.Value, protocol, creds.Value.Username, creds.Value.Domain ?? "(none)");
+
         var payload = GuacamoleTokenBuilder.BuildEncryptedPayload(
             jsonKey, connectionName, protocol, "server", localPort.Value,
             creds.Value.Username, creds.Value.Password, creds.Value.Domain, TimeSpan.FromMinutes(20));

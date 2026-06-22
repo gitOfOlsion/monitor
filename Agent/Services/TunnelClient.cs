@@ -63,7 +63,30 @@ public class TunnelClient
                 if (read == 0) break; // local RDP/VNC closed the connection
 
                 var chunk = buffer[..read];
-                await hub.SendAsync("TunnelDataFromAgent", sessionId, chunk, ct);
+                try
+                {
+                    await hub.SendAsync("TunnelDataFromAgent", sessionId, chunk, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // SignalR temporarily disconnected — wait for it to reconnect
+                    // instead of tearing down the local RDP connection which is still live.
+                    _log.LogWarning("SignalR send failed in tunnel relay, waiting for reconnect... ({Msg})", ex.Message);
+                    var waited = 0;
+                    while (hub.State != Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected && waited < 20000)
+                    {
+                        await Task.Delay(500, ct);
+                        waited += 500;
+                    }
+                    if (hub.State != Microsoft.AspNetCore.SignalR.Client.HubConnectionState.Connected)
+                    {
+                        _log.LogWarning("SignalR did not reconnect within 20s — closing tunnel");
+                        break;
+                    }
+                    // Retry the send now that we're reconnected
+                    try { await hub.SendAsync("TunnelDataFromAgent", sessionId, chunk, ct); }
+                    catch { break; }
+                }
             }
         }
         catch (OperationCanceledException) { /* expected on stop */ }
