@@ -101,7 +101,12 @@ public class AgentService
         if (a == null)
         {
             if (!await db.Institutions.AnyAsync(i => i.Id == institutionId))
+            {
+                _log.LogWarning("Heartbeat from {Machine} references institution {Inst} which does not exist. " +
+                    "This agent has a stale token — re-download and reinstall the agent from the current dashboard.",
+                    machineName, institutionId);
                 return (Guid.Empty, null);
+            }
 
             a = new AgentEntity
             {
