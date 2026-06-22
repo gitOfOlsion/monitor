@@ -44,7 +44,7 @@ public class AgentWorker : BackgroundService
                 // when queried from SYSTEM in certain session configurations).
                 using var searcher = new System.Management.ManagementObjectSearcher(
                     "SELECT Handle FROM Win32_Process WHERE Name='explorer.exe'");
-                foreach (var obj in searcher.Get())
+                foreach (System.Management.ManagementObject obj in searcher.Get())
                 {
                     var args = new object[] { string.Empty, string.Empty };
                     var ret = (uint)(obj.InvokeMethod("GetOwner", args) ?? 1u);
