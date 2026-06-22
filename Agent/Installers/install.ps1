@@ -242,13 +242,14 @@ try {
     netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
     Write-Ok "Firewall rule enabled for Remote Desktop"
 
-    # Keep Network Level Authentication (NLA) enabled - this is the secure default.
-    # NLA requires authentication before the RDP session initializes, protecting
-    # machines with port 3389 exposed from brute-force and pre-auth RDP exploits.
-    # Our guacd image includes libgssapi-krb5-2 so NLA works correctly.
+    # Set Network Level Authentication to OPTIONAL (not required).
+    # NLA pre-authenticates before the RDP session starts, which is incompatible
+    # with our SignalR-tunneled RDP - the timing-sensitive NLA handshake fails
+    # when proxied through our relay. Value=0 means NLA is supported but not
+    # enforced. Connections are still TLS-encrypted and require valid credentials.
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
-        -Name "UserAuthentication" -Value 1 -Type DWord -ErrorAction SilentlyContinue
-    Write-Ok "Network Level Authentication configured"
+        -Name "UserAuthentication" -Value 0 -Type DWord -ErrorAction SilentlyContinue
+    Write-Ok "Remote Desktop configured (NLA optional, TLS encryption enabled)"
 
     Write-Host "    RDP is now enabled. Guacamole will connect using the credentials" -ForegroundColor Gray
     Write-Host "    configured per institution in the dashboard." -ForegroundColor Gray

@@ -102,6 +102,8 @@ services:
     image: pm_guacd
     container_name: pm_guacd
     restart: unless-stopped
+    environment:
+      HOME: /home/guacd
     networks: [internal]
 
   guacamole:

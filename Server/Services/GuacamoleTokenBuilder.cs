@@ -51,20 +51,17 @@ public static class GuacamoleTokenBuilder
         if (protocol == "rdp")
         {
             if (!string.IsNullOrEmpty(domain)) parameters["domain"] = domain;
-            // "any" lets FreeRDP negotiate the security mode with Windows.
-            // This results in NTLM-based NLA which works without Kerberos libs.
-            // Pure Kerberos NLA requires krb5 libs that aren't in the guacd image.
-            parameters["security"]              = "any";
+            // Use TLS security mode (not NLA). NLA pre-authentication is disabled on
+            // agent machines by the installer (UserAuthentication=0) because NLA's
+            // timing-sensitive handshake fails when proxied through our SignalR tunnel.
+            // TLS still encrypts the connection; credentials are verified at login.
+            parameters["security"]              = "tls";
             parameters["ignore-cert"]           = "true";
             parameters["enable-drive"]          = "false";
             parameters["create-drive-path"]     = "false";
             parameters["enable-wallpaper"]      = "false";
             parameters["enable-theming"]        = "false";
             parameters["enable-font-smoothing"] = "false";
-            // Console/admin session: connects to session 0 (the physical console) instead
-            // of opening a new virtual session. On Windows Pro (which only allows one
-            // concurrent RDP session), this avoids "connection refused" when another
-            // RDP session is already active.
             parameters["console"]               = "true";
         }
 
