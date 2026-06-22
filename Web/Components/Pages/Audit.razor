@@ -1,6 +1,7 @@
 @page "/audit"
 @attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
 @inject ServerApiClient Api
+@inject TimeZoneService TZ
 
 <PageTitle>Audit Log — Peripheral Monitor</PageTitle>
 
@@ -39,7 +40,7 @@ else
                 @foreach (var l in Filtered)
                 {
                     <tr>
-                        <td class="pm-mono">@l.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                        <td class="pm-mono">@Fmt(l.Timestamp)</td>
                         <td><strong>@l.Actor</strong></td>
                         <td><span class="pm-badge pm-badge-@l.ActorRole.ToLower()">@l.ActorRole</span></td>
                         <td><code>@l.Action</code></td>
@@ -59,6 +60,21 @@ else
     private List<string> _actions = [];
     private bool _loading = true;
     private string _fActor = "", _fAction = "";
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
 
     private IEnumerable<AuditLogDto> Filtered => _logs.Where(l =>
         (string.IsNullOrEmpty(_fActor)  || l.Actor.Contains(_fActor, StringComparison.OrdinalIgnoreCase)) &&

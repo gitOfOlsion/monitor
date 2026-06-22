@@ -3,6 +3,7 @@
 @inject ServerApiClient Api
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
 
 <PageTitle>Institutions — Peripheral Monitor</PageTitle>
 
@@ -140,7 +141,7 @@ else
                         <td><code>@i.Slug</code></td>
                         <td>@i.Type</td>
                         <td>@i.ContactEmail</td>
-                        <td>@i.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                        <td>@Fmt(i.CreatedAt, "yyyy-MM-dd")</td>
                         <td class="pm-actions">
                             <button class="pm-btn pm-btn-primary pm-btn-sm"
                                     @onclick="() => ShowDownloads(i)">
@@ -191,6 +192,21 @@ else
     private string? _provisionToken;
     private string? _message;
     private bool _isError;
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
 
     // RDP credentials modal state
     private InstitutionDto? _rdpInst;

@@ -238,6 +238,10 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 .pm-loading { color: var(--text-muted); padding: 2rem; text-align: center; }
 .pm-empty   { color: var(--text-muted); padding: 2rem; text-align: center; font-size: 13px; }
 
+.pm-event-group        { margin-bottom: .5rem; }
+.pm-event-group-header { font-size: 16px; font-weight: 600; margin: 1.25rem 0 .5rem 0; display: flex; align-items: center; gap: .4rem; }
+.pm-event-group-count  { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+
 /* ── Institution group headers ─────────────────────────────────────── */
 .pm-group-header {
   font-size: 13px; font-weight: 700; text-transform: uppercase;

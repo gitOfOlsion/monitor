@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
 @inject ServerApiClient Api
 @inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
 
 <PageTitle>Users — Peripheral Monitor</PageTitle>
 
@@ -71,7 +72,7 @@ else
                             <td><strong>@u.UserName</strong></td>
                             <td>@u.Email</td>
                             <td><span class="pm-badge pm-badge-@u.Role.ToLower()">@u.Role</span></td>
-                            <td>@u.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                            <td>@Fmt(u.CreatedAt, "yyyy-MM-dd")</td>
                             <td class="pm-actions">
                                 @if (u.Role != "SuperAdmin")
                                 {
@@ -97,6 +98,21 @@ else
     private bool   _loading = true, _showCreate, _isSuperAdmin, _msgError;
     private string _uName = "", _uEmail = "", _uPass = "", _uRole = "Viewer", _uInstitution = "";
     private string? _error, _message;
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
+        => utc.Add(_tzOffset).ToString(format);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
 
     private bool CanCreate =>
         !string.IsNullOrWhiteSpace(_uName) &&

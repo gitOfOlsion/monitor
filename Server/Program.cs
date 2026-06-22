@@ -97,6 +97,37 @@ try
         //   dotnet ef migrations add InitialCreate --project Server --startup-project Server
         await db.Database.EnsureCreatedAsync();
 
+        // EnsureCreated only runs HasData seeding for a BRAND NEW database — it won't
+        // retroactively add new categories to an existing one. This keeps existing
+        // deployments in sync without requiring a volume wipe whenever a category is added.
+        var existingCatNames = await db.DeviceCategories.Select(c => c.Name).ToListAsync();
+        var categoriesToEnsure = new (string Name, string Icon, string Description)[]
+        {
+            ("USB Device",     "🔌", "Generic USB device"),
+            ("Keyboard",       "⌨️", "Keyboard input device"),
+            ("Mouse",          "🖱️", "Pointing device"),
+            ("HID Device",     "🎮", "Human interface device"),
+            ("Storage",        "💾", "Mass storage"),
+            ("Optical Drive",  "💿", "CD/DVD drive"),
+            ("Display",        "🖥️", "Monitor or display"),
+            ("Audio",          "🔊", "Audio device"),
+            ("Bluetooth",      "📶", "Bluetooth device"),
+            ("Network",        "🌐", "Network interface"),
+            ("Camera",         "📷", "Camera or scanner"),
+            ("Printer",        "🖨️", "Printer"),
+            ("Serial/COM Port","🔌", "Serial or COM port"),
+            ("Input Device",   "🕹️", "Generic input"),
+            ("Other",          "🔧", "Uncategorised"),
+            ("UserSession",    "👤", "User login/logout/switch"),
+            ("RemoteDesktop",  "🖥️", "Remote desktop session activity"),
+        };
+        foreach (var (name, icon, desc) in categoriesToEnsure)
+        {
+            if (!existingCatNames.Contains(name))
+                db.DeviceCategories.Add(new DeviceCategoryEntity { Name = name, Icon = icon, Description = desc });
+        }
+        await db.SaveChangesAsync();
+
         foreach (var role in new[] { "SuperAdmin", "InstitutionAdmin", "Viewer" })
             if (!await roleMgr.RoleExistsAsync(role)) await roleMgr.CreateAsync(new IdentityRole(role));
 

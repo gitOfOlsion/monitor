@@ -184,7 +184,9 @@ public class AppDbContext : IdentityDbContext<AppUser>
                 new { Id=12, Name="Printer",          Icon="🖨️", Description="Printer" },
                 new { Id=13, Name="Serial/COM Port",  Icon="🔌", Description="Serial or COM port" },
                 new { Id=14, Name="Input Device",     Icon="🕹️", Description="Generic input" },
-                new { Id=15, Name="Other",            Icon="🔧", Description="Uncategorised" }
+                new { Id=15, Name="Other",            Icon="🔧", Description="Uncategorised" },
+                new { Id=16, Name="UserSession",      Icon="👤", Description="User login/logout/switch" },
+                new { Id=17, Name="RemoteDesktop",    Icon="🖥️", Description="Remote desktop session activity" }
             );
         });
 

@@ -13,52 +13,69 @@
     <h1>Device Events</h1>
     <div class="pm-filters">
         <input class="pm-input pm-input-sm" @bind="_fMachine" @bind:event="oninput" placeholder="Machine…" />
-        <select class="pm-input pm-input-sm" @bind="_fType">
-            <option value="">All types</option>
-            <option value="Connected">Connected</option>
-            <option value="Disconnected">Disconnected</option>
-        </select>
-        <select class="pm-input pm-input-sm" @bind="_fCat">
-            <option value="">All categories</option>
-            @foreach (var c in _cats) { <option value="@c">@c</option> }
+        <select class="pm-input pm-input-sm" @bind="_groupBy">
+            <option value="kind">Group by kind</option>
+            <option value="date">Group by date</option>
+            <option value="none">No grouping (flat list)</option>
         </select>
     </div>
 </div>
 
-<div class="pm-table-wrapper">
-    <table class="pm-table pm-table-fixed">
-        <thead>
-            <tr>
-                <th style="width:180px">Time</th>
-                <th style="width:150px">Machine</th>
-                <th style="width:130px">Event</th>
-                <th>Device</th>
-                <th style="width:120px">Category</th>
-                <th style="width:60px">Status</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var e in Filtered)
-            {
-                <tr>
-                    <td class="pm-mono">@Fmt(e.Timestamp)</td>
-                    <td>@e.MachineName</td>
-                    <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
-                    <td>@e.FriendlyName</td>
-                    <td>@e.Category</td>
-                    <td>@e.Status</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    @if (!Filtered.Any()) { <div class="pm-empty">No events match filter.</div> }
-</div>
-<div class="pm-table-footer">Showing @Filtered.Count() of @_events.Count events</div>
+<p class="pm-hint" style="margin:0 0 1rem 0">
+    Every event the agents report shows up here — peripherals, network adapters, user
+    sessions, and anything else — nothing is hidden by default. Use the machine filter
+    or grouping above to navigate; nothing is excluded from the underlying data.
+</p>
+
+@if (!_loading && Grouped.Count == 0)
+{
+    <div class="pm-empty">No events yet.</div>
+}
+
+@foreach (var group in Grouped)
+{
+    <div class="pm-event-group">
+        <h2 class="pm-event-group-header">
+            @group.Icon @group.Label
+            <span class="pm-event-group-count">(@group.Events.Count)</span>
+        </h2>
+        <div class="pm-table-wrapper" style="margin-bottom:1.5rem">
+            <table class="pm-table pm-table-fixed">
+                <thead>
+                    <tr>
+                        <th style="width:180px">Time</th>
+                        <th style="width:150px">Machine</th>
+                        <th style="width:130px">Event</th>
+                        <th>Detail</th>
+                        <th style="width:120px">Category</th>
+                        <th style="width:80px">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in group.Events)
+                    {
+                        <tr>
+                            <td class="pm-mono">@Fmt(e.Timestamp)</td>
+                            <td>@e.MachineName</td>
+                            <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
+                            <td>@e.FriendlyName</td>
+                            <td>@e.Category</td>
+                            <td>@e.Status</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+<div class="pm-table-footer">Showing @FilteredCount of @_events.Count events</div>
 
 @code {
     private List<DeviceChangedPayload> _events = [];
-    private List<string> _cats = [];
-    private string _fMachine = "", _fType = "", _fCat = "";
+    private string _fMachine = "";
+    private string _groupBy = "kind";
+    private bool _loading = true;
     private TimeSpan _tzOffset = TimeSpan.Zero;
     private bool _tzFetched;
 
@@ -75,10 +92,64 @@
         }
     }
 
-    private IEnumerable<DeviceChangedPayload> Filtered => _events.Where(e =>
-        (string.IsNullOrEmpty(_fMachine) || e.MachineName.Contains(_fMachine, StringComparison.OrdinalIgnoreCase)) &&
-        (string.IsNullOrEmpty(_fType)    || e.EventType == _fType) &&
-        (string.IsNullOrEmpty(_fCat)     || e.Category  == _fCat));
+    // Every event the agent can report falls into one of these kinds. "Other" is the
+    // catch-all so nothing is ever silently excluded just because it doesn't match
+    // a known category - new device/category types added later just land in Other
+    // until explicitly classified here.
+    private static readonly Dictionary<string, (string Icon, string Label, string[] Categories)> Kinds = new()
+    {
+        ["peripheral"]     = ("🔌", "Peripherals",      new[] { "USB Device", "Keyboard", "Mouse", "HID Device", "Storage", "Optical Drive", "Display", "Audio", "Bluetooth", "Camera", "Printer", "Serial/COM Port", "Input Device" }),
+        ["network"]        = ("🌐", "Network",          new[] { "Network" }),
+        ["user-session"]   = ("👤", "User Sessions",    new[] { "UserSession" }),
+        ["remote-desktop"] = ("🖥️", "Remote Desktop",   new[] { "RemoteDesktop" }),
+    };
+
+    private IEnumerable<DeviceChangedPayload> FilteredEvents => _events.Where(e =>
+        string.IsNullOrEmpty(_fMachine) || e.MachineName.Contains(_fMachine, StringComparison.OrdinalIgnoreCase));
+
+    private int FilteredCount => FilteredEvents.Count();
+
+    private record EventGroup(string Icon, string Label, List<DeviceChangedPayload> Events);
+
+    private List<EventGroup> Grouped
+    {
+        get
+        {
+            var filtered = FilteredEvents.ToList();
+
+            if (_groupBy == "none")
+                return [new EventGroup("📋", "All events", filtered)];
+
+            if (_groupBy == "date")
+            {
+                return filtered
+                    .GroupBy(e => e.Timestamp.Add(_tzOffset).Date)
+                    .OrderByDescending(g => g.Key)
+                    .Select(g => new EventGroup("📅", g.Key.ToString("yyyy-MM-dd (dddd)"), g.OrderByDescending(e => e.Timestamp).ToList()))
+                    .ToList();
+            }
+
+            // Group by kind (default) - every event lands somewhere, "Other" catches
+            // anything not explicitly mapped above so nothing is ever hidden.
+            var result = new List<EventGroup>();
+            var remaining = filtered.ToList();
+
+            foreach (var (_, kind) in Kinds)
+            {
+                var matched = remaining.Where(e => kind.Categories.Contains(e.Category)).OrderByDescending(e => e.Timestamp).ToList();
+                if (matched.Count > 0)
+                {
+                    result.Add(new EventGroup(kind.Icon, kind.Label, matched));
+                    remaining = remaining.Except(matched).ToList();
+                }
+            }
+
+            if (remaining.Count > 0)
+                result.Add(new EventGroup("🔧", "Other", remaining.OrderByDescending(e => e.Timestamp).ToList()));
+
+            return result;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -86,7 +157,7 @@
         _events = db.Select(e => new DeviceChangedPayload(
             e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
             e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
-        _cats = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
+        _loading = false;
 
         var auth = await AuthState.GetAuthenticationStateAsync();
         var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
@@ -98,7 +169,6 @@
     private void OnLive(DeviceChangedPayload p)
     {
         _events.Insert(0, p); if (_events.Count > 500) _events.RemoveAt(500);
-        _cats = _events.Select(e => e.Category).Distinct().OrderBy(c => c).ToList();
         InvokeAsync(StateHasChanged);
     }
 

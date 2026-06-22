@@ -22,6 +22,12 @@ public class AgentWorker : BackgroundService
     private readonly AgentPlatform _platform    = OperatingSystem.IsWindows() ? AgentPlatform.Windows : AgentPlatform.Linux;
     private Guid _institutionId = Guid.Empty;
 
+    // Events detected while the SignalR connection is down (e.g. during the brief
+    // reconnect window after a network blip - exactly when a "tunnel disconnected"
+    // event is most likely to fire) are buffered here instead of silently dropped,
+    // then flushed as soon as the connection is back up.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<DeviceChangedPayload> _pendingEvents = new();
+
     public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, TunnelClient tunnel, ILogger<AgentWorker> l)
     { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; }
 
@@ -103,6 +109,7 @@ public class AgentWorker : BackgroundService
                     await _hub.SendAsync("AgentHeartbeat",
                         new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count, loggedInUser), ct);
                     _log.LogDebug("Heartbeat — {N} devices, User={User}", snap.Count, loggedInUser ?? "none");
+                    await FlushPendingEventsAsync();
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)
                     try { await _hub.StartAsync(ct); } catch { }
@@ -114,15 +121,48 @@ public class AgentWorker : BackgroundService
 
     private async Task OnDeviceChanged(string eventType, DeviceInfo dev)
     {
-        if (_hub?.State != HubConnectionState.Connected) return;
+        var payload = new DeviceChangedPayload(_machineName, _institutionId, eventType,
+            dev.DeviceId, dev.FriendlyName, dev.Category, dev.Status, DateTime.UtcNow);
+
+        if (_hub?.State != HubConnectionState.Connected)
+        {
+            // Buffer instead of dropping - this is exactly when a flaky network
+            // adapter event is likely to coincide with our own connection blipping.
+            _pendingEvents.Enqueue(payload);
+            _log.LogWarning("[{Event}] {Cat} — {Name} (hub disconnected, buffered for later send)", eventType, dev.Category, dev.FriendlyName);
+            return;
+        }
+
         try
         {
-            await _hub.SendAsync("DeviceChanged",
-                new DeviceChangedPayload(_machineName, _institutionId, eventType,
-                    dev.DeviceId, dev.FriendlyName, dev.Category, dev.Status, DateTime.UtcNow));
+            await _hub.SendAsync("DeviceChanged", payload);
             _log.LogInformation("[{Event}] {Cat} — {Name}", eventType, dev.Category, dev.FriendlyName);
         }
-        catch (Exception ex) { _log.LogWarning(ex, "DeviceChanged send error"); }
+        catch (Exception ex)
+        {
+            _pendingEvents.Enqueue(payload);
+            _log.LogWarning(ex, "DeviceChanged send error - buffered for retry");
+        }
+    }
+
+    /// <summary>Flushes any device-change events that were buffered while disconnected.</summary>
+    private async Task FlushPendingEventsAsync()
+    {
+        if (_hub?.State != HubConnectionState.Connected) return;
+        while (_pendingEvents.TryDequeue(out var payload))
+        {
+            try
+            {
+                await _hub.SendAsync("DeviceChanged", payload);
+                _log.LogInformation("[Flushed] {Event} {Cat} — {Name}", payload.EventType, payload.Category, payload.FriendlyName);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Failed to flush buffered event - re-queueing");
+                _pendingEvents.Enqueue(payload);
+                break; // stop trying, connection likely dropped again
+            }
+        }
     }
 
     private async Task<string?> ResolveTokenAsync(CancellationToken ct)
