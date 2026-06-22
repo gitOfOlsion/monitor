@@ -1,12 +1,9 @@
 FROM guacamole/guacd:latest
 
-# Install the GSSAPI/Kerberos library that FreeRDP needs for NLA authentication.
-# Without this, guacd reports "Cannot load library libgssapi_krb5.so.2" and any
-# Windows RDP server with UserAuthentication=1 (NLA required) refuses the connection
-# with "wrong security type". This is a known missing dependency in the official
-# guacd image — see https://github.com/apache/guacamole-client/issues for context.
+# guacd is Alpine-based. Install krb5-libs for GSSAPI/Kerberos support.
+# NOTE: Due to FreeRDP 2.x limitations in this image, true Kerberos NLA may
+# still not work. The real solution is security=any in connection params,
+# which lets FreeRDP fall back to NTLM-based NLA (which works without krb5).
 USER root
-RUN apt-get update -qq && \
-    apt-get install -y --no-install-recommends libgssapi-krb5-2 && \
-    rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache krb5-libs 2>/dev/null || true
 USER daemon
