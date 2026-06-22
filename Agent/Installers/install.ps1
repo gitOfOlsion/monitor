@@ -242,7 +242,10 @@ try {
     netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
     Write-Ok "Firewall rule enabled for Remote Desktop"
 
-    # Set Network Level Authentication (NLA) - allows connection with credentials
+    # Keep Network Level Authentication (NLA) enabled - this is the secure default.
+    # NLA requires authentication before the RDP session initializes, protecting
+    # machines with port 3389 exposed from brute-force and pre-auth RDP exploits.
+    # Our guacd image includes libgssapi-krb5-2 so NLA works correctly.
     Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
         -Name "UserAuthentication" -Value 1 -Type DWord -ErrorAction SilentlyContinue
     Write-Ok "Network Level Authentication configured"

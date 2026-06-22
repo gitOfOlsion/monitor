@@ -92,9 +92,14 @@ services:
 
   # ── Guacamole remote desktop gateway ─────────────────────────────────────
   # guacd: protocol daemon (RDP/VNC/SSH backend)
-  # guacamole: HTML5 web frontend, using noauth extension (dashboard is auth)
+  # Built from a custom Dockerfile that adds libgssapi-krb5-2 (Kerberos/GSSAPI),
+  # which the official image is missing. Without it, FreeRDP cannot perform NLA
+  # authentication and Windows machines with UserAuthentication=1 refuse all connections.
   guacd:
-    image: guacamole/guacd:latest
+    build:
+      context: .
+      dockerfile: Guacamole/guacd.Dockerfile
+    image: pm_guacd
     container_name: pm_guacd
     restart: unless-stopped
     networks: [internal]
