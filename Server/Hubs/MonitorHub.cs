@@ -74,10 +74,19 @@ public class MonitorHub : Hub
             await Groups.AddToGroupAsync(Context.ConnectionId, InstGroup(id));
     }
 
-    /// <summary>
-    /// Agent forwards raw bytes from its local RDP/VNC connection back to Guacamole.
-    /// Part of the SignalR-tunneled remote desktop relay (see TunnelManager).
-    /// </summary>
+    /// <summary>Agent signals it has connected to its local RDP port and is ready to relay.</summary>
+    public Task TunnelReady(string sessionId)
+    {
+        var agentId = _connections.GetAgentIdForConnection(Context.ConnectionId);
+        if (agentId.HasValue)
+        {
+            _log.LogDebug("TunnelReady from agent {Agent} session {Session}", agentId.Value, sessionId);
+            _tunnels.OnAgentReady(agentId.Value);
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Agent forwards raw bytes from its local RDP/VNC connection back to Guacamole.</summary>
     public async Task TunnelDataFromAgent(string sessionId, byte[] data)
     {
         var agentId = _connections.GetAgentIdForConnection(Context.ConnectionId);
