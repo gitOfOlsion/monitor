@@ -43,6 +43,12 @@ public class TunnelClient
             return;
         }
 
+        // Signal the server that the local RDP connection is live and we're ready to relay.
+        // The server waits for this before handing the tunnel port to Guacamole, ensuring
+        // guacd never connects to an empty stream.
+        try { await hub.SendAsync("TunnelReady", sessionId); }
+        catch (Exception ex) { _log.LogWarning(ex, "Failed to send TunnelReady for {Session}", sessionId); }
+
         _ = RelayLoopAsync(hub, sessionId, _cts.Token);
     }
 
