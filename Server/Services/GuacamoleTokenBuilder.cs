@@ -52,12 +52,12 @@ public static class GuacamoleTokenBuilder
         {
             if (!string.IsNullOrEmpty(domain)) parameters["domain"] = domain;
             parameters["security"]              = "nla";
-            parameters["ignore-cert"]            = "true";
-            parameters["enable-drive"]           = "false";
-            parameters["create-drive-path"]      = "false";
-            parameters["enable-wallpaper"]        = "false";
-            parameters["enable-theming"]          = "false";
-            parameters["enable-font-smoothing"]   = "false";
+            parameters["ignore-cert"]           = "true";
+            parameters["enable-drive"]          = "false";
+            parameters["create-drive-path"]     = "false";
+            parameters["enable-wallpaper"]      = "false";
+            parameters["enable-theming"]        = "false";
+            parameters["enable-font-smoothing"] = "false";
         }
 
         var payload = new
