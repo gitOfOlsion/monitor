@@ -61,6 +61,11 @@ public static class GuacamoleTokenBuilder
             parameters["enable-wallpaper"]      = "false";
             parameters["enable-theming"]        = "false";
             parameters["enable-font-smoothing"] = "false";
+            // Console/admin session: connects to session 0 (the physical console) instead
+            // of opening a new virtual session. On Windows Pro (which only allows one
+            // concurrent RDP session), this avoids "connection refused" when another
+            // RDP session is already active.
+            parameters["console"]               = "true";
         }
 
         var payload = new

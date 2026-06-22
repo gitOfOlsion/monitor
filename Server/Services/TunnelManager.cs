@@ -59,18 +59,22 @@ public class TunnelManager
         var sessionId = Guid.NewGuid().ToString("N");
         session.SessionId = sessionId;
 
+        // Start the accept loop BEFORE telling the agent to connect —
+        // this ensures AcceptTcpClientAsync is already waiting by the time
+        // guacd tries to connect to the port. TcpListener.Start() already
+        // queues incoming connections in its backlog, so the timing is safe.
+        _ = AcceptLoopAsync(session);
+
         await _hub.Clients.Client(connId).SendAsync("StartTunnel", sessionId, targetPort);
 
-        // Wait up to 10 seconds for the agent to connect to its local RDP port and signal ready.
-        var completed = await Task.WhenAny(readyTcs.Task, Task.Delay(TimeSpan.FromSeconds(10)));
+        // Wait up to 15 seconds for the agent to connect to its local RDP port and signal ready.
+        var completed = await Task.WhenAny(readyTcs.Task, Task.Delay(TimeSpan.FromSeconds(15)));
         if (completed != readyTcs.Task || !readyTcs.Task.Result)
         {
-            _log.LogWarning("Tunnel ready-timeout for agent {Agent} — agent did not connect to local port {Port} within 10s", agentId, targetPort);
+            _log.LogWarning("Tunnel ready-timeout for agent {Agent} — agent did not connect to local port {Port} within 15s", agentId, targetPort);
             await StopTunnelAsync(agentId);
             return null;
         }
-
-        _ = AcceptLoopAsync(session);
 
         _log.LogInformation("Tunnel started for agent {Agent} -> local port {Port} -> target {TargetPort}", agentId, localPort, targetPort);
         return localPort;
