@@ -17,10 +17,14 @@ public record HeartbeatPayload(
     string        MachineName,
     string        MacAddress,
     Guid          InstitutionId,
-    string        Platform,       // "Windows" or "Linux"
+    string        Platform,
     DateTime      Timestamp,
     int           DeviceCount,
-    string?       LoggedInUser = null // currently logged-in user, null if none/unknown
+    string?       LoggedInUser = null,
+    string?       CpuName      = null,
+    int?          CpuCores     = null,
+    long?         RamMb        = null,
+    string?       DiskInfo     = null
 );
 
 public record DeviceChangedPayload(
@@ -125,6 +129,10 @@ public class AgentDto
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
     public string?   LoggedInUser  { get; set; }
+    public string?   CpuName       { get; set; }
+    public int?      CpuCores      { get; set; }
+    public long?     RamMb         { get; set; }
+    public string?   DiskInfo      { get; set; }
     // Nested institution info (populated when Server includes it)
     public InstitutionDto? Institution { get; set; }
 }

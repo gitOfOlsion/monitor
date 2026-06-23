@@ -92,7 +92,8 @@ public class AgentService
     }
 
     public async Task<(Guid agentId, DeviceChangedPayload? loginEvent)> UpdateHeartbeatAsync(
-        string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count, string? loggedInUser = null)
+        string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count,
+        string? loggedInUser = null, string? cpuName = null, int? cpuCores = null, long? ramMb = null, string? diskInfo = null)
     {
         await using var db = await _db.CreateDbContextAsync();
         var a = await db.Agents.FirstOrDefaultAsync(x => x.MachineName == machineName && x.InstitutionId == institutionId);
@@ -162,6 +163,11 @@ public class AgentService
         a.LastHeartbeat = ts;
         a.DeviceCount   = count;
         a.Status        = "Approved";
+        // Update hardware info when provided (collected once on agent startup, non-null after first heartbeat)
+        if (!string.IsNullOrEmpty(cpuName))  a.CpuName  = cpuName;
+        if (cpuCores.HasValue)               a.CpuCores = cpuCores;
+        if (ramMb.HasValue)                  a.RamMb    = ramMb;
+        if (!string.IsNullOrEmpty(diskInfo)) a.DiskInfo = diskInfo;
         await db.SaveChangesAsync();
         return (a.Id, userEvent);
     }

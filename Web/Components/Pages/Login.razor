@@ -2,44 +2,67 @@
 @layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
 @inject NavigationManager Nav
 
-<PageTitle>Login — Peripheral Monitor</PageTitle>
+<PageTitle>Sign In — Peripheral Monitor</PageTitle>
 
-<div class="pm-login-page">
-    <div class="pm-login-card">
-        <div class="pm-login-logo">
-            <span style="font-size:2.5rem">📡</span>
+<div class="pm-login-wrap">
+    <div class="pm-login-left">
+        <div class="pm-login-brand">
+            <span class="pm-login-icon">📡</span>
             <h1>Peripheral Monitor</h1>
+            <p class="pm-login-tagline">Centralised device visibility across all your institutions</p>
         </div>
+        <ul class="pm-login-features">
+            <li>🖥️ Real-time peripheral tracking (USB, keyboard, mouse, audio…)</li>
+            <li>🌐 Multi-institution, multi-tenant dashboard</li>
+            <li>📊 Device event history and audit log</li>
+            <li>🔑 Web-based remote desktop — no client required</li>
+            <li>👤 Live logged-in user visibility</li>
+        </ul>
+        <p class="pm-login-footer">© @DateTime.UtcNow.Year Peripheral Monitor · All rights reserved</p>
+    </div>
 
-        @if (ShowError)
-        {
-            <div class="pm-alert pm-alert-error">Invalid username or password.</div>
-        }
+    <div class="pm-login-right">
+        <div class="pm-login-card">
+            <div class="pm-login-card-header">
+                <span style="font-size:1.6rem">🔐</span>
+                <h2>Sign in to your account</h2>
+                <p>Enter your credentials to access the dashboard</p>
+            </div>
 
-        <!-- Standard HTML form — required for cookie SignIn in Blazor Server -->
-        <form method="post" action="/auth/login">
-            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
-            <div class="pm-field">
-                <label for="username">Username</label>
-                <input id="username" name="username" type="text"
-                       class="pm-input" autocomplete="username" required />
-            </div>
-            <div class="pm-field">
-                <label for="password">Password</label>
-                <input id="password" name="password" type="password"
-                       class="pm-input" autocomplete="current-password" required />
-            </div>
-            <button type="submit" class="pm-btn pm-btn-primary pm-btn-full">
-                Sign in
-            </button>
-        </form>
+            @if (ShowError)
+            {
+                <div class="pm-alert pm-alert-error" style="margin-bottom:1rem">
+                    ⚠ Invalid username or password. Please try again.
+                </div>
+            }
+
+            <form method="post" action="/auth/login">
+                <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+                <div class="pm-field">
+                    <label for="username">Username</label>
+                    <input id="username" name="username" type="text"
+                           class="pm-input" autocomplete="username"
+                           placeholder="Enter your username" required autofocus />
+                </div>
+                <div class="pm-field">
+                    <label for="password">Password</label>
+                    <input id="password" name="password" type="password"
+                           class="pm-input" autocomplete="current-password"
+                           placeholder="Enter your password" required />
+                </div>
+                <button type="submit" class="pm-btn pm-btn-primary pm-btn-full pm-login-submit">
+                    Sign in →
+                </button>
+            </form>
+
+            <p class="pm-login-hint">
+                Contact your system administrator if you have forgotten your credentials.
+            </p>
+        </div>
     </div>
 </div>
 
 @code {
-    [Parameter, SupplyParameterFromQuery]
-    public string? ReturnUrl { get; set; }
-
-    [Parameter, SupplyParameterFromQuery]
-    public bool ShowError { get; set; }
+    [Parameter, SupplyParameterFromQuery] public string? ReturnUrl  { get; set; }
+    [Parameter, SupplyParameterFromQuery] public bool   ShowError   { get; set; }
 }

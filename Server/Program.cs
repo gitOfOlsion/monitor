@@ -97,6 +97,19 @@ try
         //   dotnet ef migrations add InitialCreate --project Server --startup-project Server
         await db.Database.EnsureCreatedAsync();
 
+        // Add new hardware columns to existing deployments (EnsureCreated won't do this).
+        // Using raw SQL with IF NOT EXISTS is safe to run on every startup.
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+            ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""CpuName""  TEXT;
+            ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""CpuCores"" INTEGER;
+            ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""RamMb""    BIGINT;
+            ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""DiskInfo"" TEXT;
+        ";
+        await cmd.ExecuteNonQueryAsync();
+
         // EnsureCreated only runs HasData seeding for a BRAND NEW database — it won't
         // retroactively add new categories to an existing one. This keeps existing
         // deployments in sync without requiring a volume wipe whenever a category is added.

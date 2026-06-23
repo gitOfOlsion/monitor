@@ -64,6 +64,10 @@ public class AgentEntity
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
     public string?   LoggedInUser  { get; set; }  // current Windows/Linux user session
+    public string?   CpuName       { get; set; }  // e.g. "Intel Core i7-10700"
+    public int?      CpuCores      { get; set; }  // logical processors
+    public long?     RamMb         { get; set; }  // total RAM in MB
+    public string?   DiskInfo      { get; set; }  // e.g. "SSD 512GB, HDD 1TB"
 
     public InstitutionEntity    Institution { get; set; } = null!;
     public AgentTemplateEntity? Template    { get; set; }
