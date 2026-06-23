@@ -27,18 +27,33 @@ else
         <div class="pm-table-wrapper" style="margin-bottom:1.5rem">
             <table class="pm-table">
                 <thead><tr>
-                    <th>Machine</th><th>Platform</th><th>IP</th><th>MAC</th>
-                    <th>👤 Logged In</th><th>Status</th><th>Last Heartbeat</th><th>Devices</th><th>Actions</th>
+                    <th>Machine</th><th>Platform</th>
+                    <th>👤 Logged In</th><th>CPU</th><th>RAM</th><th>Disk</th>
+                    <th>Status</th><th>Last Heartbeat</th><th>Devices</th><th>Actions</th>
                 </tr></thead>
                 <tbody>
                     @foreach (var a in group)
                     {
                         <tr>
-                            <td><strong>@a.MachineName</strong></td>
+                            <td>
+                                <a class="pm-machine-link" href="/events?machine=@Uri.EscapeDataString(a.MachineName)"
+                                   title="View events for @a.MachineName">
+                                    <strong>@a.MachineName</strong>
+                                </a>
+                                <div style="font-size:11px;color:var(--text-muted)">@a.MacAddress</div>
+                            </td>
                             <td>@Icon(a.Platform) @a.Platform</td>
-                            <td>@a.IPAddress</td>
-                            <td><code>@a.MacAddress</code></td>
                             <td class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
+                            <td style="font-size:12px">
+                                @if (a.CpuName != null)
+                                {
+                                    <span title="@a.CpuName">@ShortCpu(a.CpuName)</span>
+                                    @if (a.CpuCores.HasValue) { <span style="color:var(--text-muted)"> /@a.CpuCores</span> }
+                                }
+                                else { <span style="color:var(--text-muted)">—</span> }
+                            </td>
+                            <td style="font-size:12px">@(a.RamMb.HasValue ? $"{a.RamMb/1024} GB" : "—")</td>
+                            <td style="font-size:12px">@(a.DiskInfo ?? "—")</td>
                             <td><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
                             <td>@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
                             <td>@a.DeviceCount</td>
@@ -57,7 +72,7 @@ else
                                         <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via browser">🖥️ Remote Desktop</button>
                                         <button class="pm-btn pm-btn-warning pm-btn-sm" @onclick="@(() => OpenCommand(a, "Restart"))" title="Restart machine">🔄 Restart</button>
                                         <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="@(() => OpenCommand(a, "Shutdown"))" title="Shutdown machine">⏻ Shutdown</button>
-                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel pending shutdown/restart">🛑 Cancel</button>
+                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel">🛑 Cancel</button>
                                     }
                                 }
                                 @if (a.Status != "Approved")
@@ -201,6 +216,18 @@ else
 
     private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
         => utc.Add(_tzOffset).ToString(format);
+
+    // Shorten CPU name for table display: "Intel(R) Core(TM) i7-10700 CPU @ 2.90GHz" → "Core i7-10700"
+    private static string ShortCpu(string name)
+    {
+        name = name.Replace("(R)", "").Replace("(TM)", "").Replace("CPU", "").Trim();
+        // Keep only the meaningful part: e.g. "Intel Core i7-10700 @ 2.90GHz" → "Core i7-10700"
+        var at = name.IndexOf('@');
+        if (at > 0) name = name[..at].Trim();
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        // Drop the brand prefix ("Intel", "AMD") if we have enough tokens
+        return parts.Length > 2 ? string.Join(" ", parts[1..]) : name;
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

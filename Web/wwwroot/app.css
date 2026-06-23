@@ -187,17 +187,37 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 .pm-textarea    { min-height: 120px; resize: vertical; font-family: monospace; font-size: 12px; }
 
 /* ── Login ─────────────────────────────────────────────────────────────── */
-.pm-login-page {
-  min-height: 100vh; display: flex; align-items: center;
-  justify-content: center; background: var(--bg);
+/* ── Login page ──────────────────────────────────────────────────────── */
+.pm-login-wrap {
+    display: flex; min-height: 100vh;
 }
-.pm-login-card {
-  width: 100%; max-width: 380px; background: var(--surface);
-  border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 2rem; box-shadow: var(--shadow);
+.pm-login-left {
+    flex: 1; background: linear-gradient(145deg, #1e3a5f 0%, #2d6a9f 100%);
+    color: #fff; padding: 3rem 2.5rem;
+    display: flex; flex-direction: column; justify-content: center; gap: 2rem;
 }
-.pm-login-logo { text-align: center; margin-bottom: 1.5rem; }
-.pm-login-logo h1 { font-size: 1.2rem; margin-top: .5rem; }
+.pm-login-brand  { text-align: left; }
+.pm-login-icon   { font-size: 3rem; display: block; margin-bottom: .5rem; }
+.pm-login-left h1 { font-size: 2rem; font-weight: 700; margin: 0 0 .5rem 0; color: #fff; }
+.pm-login-tagline { color: rgba(255,255,255,.75); font-size: 1rem; margin: 0; }
+.pm-login-features { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .75rem; }
+.pm-login-features li { font-size: .95rem; color: rgba(255,255,255,.9); }
+.pm-login-footer { font-size: .75rem; color: rgba(255,255,255,.45); margin: 0; }
+.pm-login-right {
+    flex: 0 0 440px; background: var(--surface);
+    display: flex; align-items: center; justify-content: center; padding: 2rem;
+}
+.pm-login-card { width: 100%; max-width: 360px; }
+.pm-login-card-header { text-align: center; margin-bottom: 1.75rem; }
+.pm-login-card-header h2 { font-size: 1.25rem; font-weight: 600; margin: .5rem 0 .25rem 0; }
+.pm-login-card-header p  { font-size: .85rem; color: var(--text-muted); margin: 0; }
+.pm-login-submit { margin-top: .5rem; font-size: 1rem; padding: .75rem; }
+.pm-login-hint   { font-size: .78rem; color: var(--text-muted); text-align: center; margin-top: 1.25rem; }
+@media (max-width: 700px) {
+    .pm-login-left  { display: none; }
+    .pm-login-right { flex: 1; }
+}
+
 
 /* ── Alerts / toasts ───────────────────────────────────────────────────── */
 .pm-alert {
@@ -239,8 +259,22 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 .pm-empty   { color: var(--text-muted); padding: 2rem; text-align: center; font-size: 13px; }
 
 .pm-event-group        { margin-bottom: .5rem; }
+.pm-machine-link { color: var(--text); text-decoration: none; }
+.pm-machine-link:hover strong { color: var(--primary); text-decoration: underline; }
 .pm-event-group-header { font-size: 16px; font-weight: 600; margin: 1.25rem 0 .5rem 0; display: flex; align-items: center; gap: .4rem; }
 .pm-event-group-count  { font-size: 13px; font-weight: 400; color: var(--text-muted); }
+
+.pm-accordion { margin-bottom: .75rem; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.pm-accordion-header {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    padding: .75rem 1rem; background: var(--surface); border: none; cursor: pointer;
+    font-size: .95rem; font-weight: 600; text-align: left; gap: 1rem;
+    transition: background .15s;
+}
+.pm-accordion-header:hover { background: var(--bg); }
+.pm-accordion-meta   { display: flex; align-items: center; gap: .75rem; font-weight: 400; }
+.pm-accordion-chevron { color: var(--text-muted); font-size: .8rem; }
+.pm-accordion-body   { border-top: 1px solid var(--border); }
 
 /* ── Institution group headers ─────────────────────────────────────── */
 .pm-group-header {

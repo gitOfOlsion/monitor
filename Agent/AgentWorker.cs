@@ -34,54 +34,128 @@ public class AgentWorker : BackgroundService
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     private static string? GetLoggedInUser()
     {
+        if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
         try
         {
-            if (OperatingSystem.IsWindows())
+            // Use explicit root\\cimv2 scope — required when running as SYSTEM service
+            // otherwise WMI queries can silently return empty results
+            var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
+            scope.Connect();
+
+            // Find the owner of explorer.exe — the most reliable interactive user indicator
+            using var searcher = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery("SELECT Handle FROM Win32_Process WHERE Name='explorer.exe'"));
+            foreach (System.Management.ManagementObject obj in searcher.Get())
             {
-                // Primary method: find the owner of the explorer.exe process, which
-                // is the most reliable way to identify the interactive user from a
-                // service context (Win32_ComputerSystem.UserName can return empty
-                // when queried from SYSTEM in certain session configurations).
-                using var searcher = new System.Management.ManagementObjectSearcher(
-                    "SELECT Handle FROM Win32_Process WHERE Name='explorer.exe'");
-                foreach (System.Management.ManagementObject obj in searcher.Get())
+                var args = new object[] { string.Empty, string.Empty };
+                var ret = (uint)(obj.InvokeMethod("GetOwner", args) ?? 1u);
+                if (ret == 0)
                 {
-                    var args = new object[] { string.Empty, string.Empty };
-                    var ret = (uint)(obj.InvokeMethod("GetOwner", args) ?? 1u);
-                    if (ret == 0)
-                    {
-                        var domain = args[1]?.ToString();
-                        var user   = args[0]?.ToString();
-                        if (!string.IsNullOrWhiteSpace(user))
-                            return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
-                    }
-                }
-                // Fallback: Win32_ComputerSystem.UserName (works in some configurations)
-                using var fallback = new System.Management.ManagementObjectSearcher(
-                    "SELECT UserName FROM Win32_ComputerSystem");
-                foreach (var obj in fallback.Get())
-                {
-                    var user = obj["UserName"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(user)) return user;
-                }
-            }
-            else
-            {
-                // Linux: ask 'who' for console/tty sessions
-                var psi = new System.Diagnostics.ProcessStartInfo("who")
-                { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
-                {
-                    var output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit();
-                    var line = output.Split('\n').FirstOrDefault(l => l.Contains(":0") || l.Contains("tty"));
-                    if (line != null) return line.Split(' ')[0];
+                    var domain = args[1]?.ToString();
+                    var user   = args[0]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(user))
+                        return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
                 }
             }
         }
         catch { /* non-fatal */ }
         return null;
+    }
+
+    private static string? GetLoggedInUserLinux()
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("who")
+            { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                var output = proc.StandardOutput.ReadToEnd();
+                proc.WaitForExit();
+                var line = output.Split('\n').FirstOrDefault(l => l.Contains(":0") || l.Contains("tty"));
+                if (line != null) return line.Split(' ')[0];
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    // Hardware info is collected once (doesn't change between heartbeats)
+    private static (string? cpu, int? cores, long? ramMb, string? disk) _hwCache = (null, null, null, null);
+    private static bool _hwCollected;
+
+    private static (string? cpu, int? cores, long? ramMb, string? disk) GetHardwareInfo()
+    {
+        if (_hwCollected) return _hwCache;
+        _hwCollected = true;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
+                scope.Connect();
+
+                // CPU
+                string? cpuName = null; int? cores = null;
+                using var cpuQ = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery("SELECT Name, NumberOfLogicalProcessors FROM Win32_Processor"));
+                foreach (System.Management.ManagementObject o in cpuQ.Get())
+                {
+                    cpuName = o["Name"]?.ToString()?.Trim();
+                    cores   = Convert.ToInt32(o["NumberOfLogicalProcessors"]);
+                    break;
+                }
+
+                // RAM
+                long? ramMb = null;
+                using var ramQ = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem"));
+                foreach (System.Management.ManagementObject o in ramQ.Get())
+                {
+                    var bytes = Convert.ToInt64(o["TotalPhysicalMemory"]);
+                    ramMb = bytes / (1024 * 1024);
+                    break;
+                }
+
+                // Disks
+                var disks = new List<string>();
+                using var diskQ = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery("SELECT Model, Size, MediaType FROM Win32_DiskDrive"));
+                foreach (System.Management.ManagementObject o in diskQ.Get())
+                {
+                    var model     = o["Model"]?.ToString()?.Trim() ?? "Disk";
+                    var sizeBytes = Convert.ToInt64(o["Size"] ?? 0L);
+                    var sizeGb    = sizeBytes / (1024L * 1024 * 1024);
+                    var media     = o["MediaType"]?.ToString() ?? "";
+                    var kind      = media.Contains("SSD", StringComparison.OrdinalIgnoreCase) || model.Contains("SSD", StringComparison.OrdinalIgnoreCase) ? "SSD"
+                                  : media.Contains("NVM", StringComparison.OrdinalIgnoreCase) || model.Contains("NVM", StringComparison.OrdinalIgnoreCase) ? "NVMe"
+                                  : "HDD";
+                    disks.Add($"{kind} {sizeGb}GB");
+                }
+
+                _hwCache = (cpuName, cores, ramMb, disks.Count > 0 ? string.Join(", ", disks) : null);
+            }
+            else
+            {
+                // Linux: read from /proc
+                string? cpuName = null; int? cores = null; long? ramMb = null;
+                var cpuInfo = System.IO.File.Exists("/proc/cpuinfo") ? System.IO.File.ReadAllText("/proc/cpuinfo") : "";
+                var modelLine = cpuInfo.Split('\n').FirstOrDefault(l => l.StartsWith("model name"));
+                if (modelLine != null) cpuName = modelLine.Split(':').LastOrDefault()?.Trim();
+                cores = cpuInfo.Split('\n').Count(l => l.StartsWith("processor"));
+                if (cores == 0) cores = null;
+
+                var memInfo = System.IO.File.Exists("/proc/meminfo") ? System.IO.File.ReadAllText("/proc/meminfo") : "";
+                var memLine = memInfo.Split('\n').FirstOrDefault(l => l.StartsWith("MemTotal"));
+                if (memLine != null && long.TryParse(new string(memLine.Where(char.IsDigit).ToArray()), out var kb))
+                    ramMb = kb / 1024;
+
+                _hwCache = (cpuName, cores, ramMb, null);
+            }
+        }
+        catch { /* non-fatal, return whatever we got */ }
+        return _hwCache;
     }
 
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -124,8 +198,10 @@ public class AgentWorker : BackgroundService
                 {
                     var snap = await _monitor.GetSnapshotAsync();
                     var loggedInUser = GetLoggedInUser();
+                    var (cpu, cores, ramMb, disk) = GetHardwareInfo();
                     await _hub.SendAsync("AgentHeartbeat",
-                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(), DateTime.UtcNow, snap.Count, loggedInUser), ct);
+                        new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(),
+                            DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk), ct);
                     _log.LogDebug("Heartbeat — {N} devices, User={User}", snap.Count, loggedInUser ?? "none");
                     await FlushPendingEventsAsync();
                 }

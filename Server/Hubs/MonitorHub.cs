@@ -19,7 +19,9 @@ public class MonitorHub : Hub
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
         _log.LogDebug("Heartbeat: {Machine} inst={Inst} devices={N}", p.MachineName, p.InstitutionId, p.DeviceCount);
-        var (agentId, userEvent) = await _agents.UpdateHeartbeatAsync(p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount, p.LoggedInUser);
+        var (agentId, userEvent) = await _agents.UpdateHeartbeatAsync(
+            p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount,
+            p.LoggedInUser, p.CpuName, p.CpuCores, p.RamMb, p.DiskInfo);
         if (agentId != Guid.Empty)
             _connections.Register(agentId, Context.ConnectionId);
 
