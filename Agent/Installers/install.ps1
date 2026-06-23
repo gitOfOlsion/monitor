@@ -122,6 +122,15 @@ if (-not $userExists) {
 
 $script:svcPassword = $securePass
 
+# Add service account to Performance Monitor Users group - this grants WMI read access
+# to Win32_LogonSession and Win32_Process which are needed to detect the logged-in user.
+try {
+    Add-LocalGroupMember -Group "Performance Monitor Users" -Member $ServiceUser -ErrorAction SilentlyContinue
+    Write-Ok "Added '$ServiceUser' to Performance Monitor Users (WMI access for user detection)"
+} catch {
+    Write-Warn "Could not add to Performance Monitor Users: $_"
+}
+
 # Grant "Log on as a service" right
 Write-Step "Granting 'Log on as a service' right..."
 try {
