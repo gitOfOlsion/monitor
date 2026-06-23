@@ -37,24 +37,32 @@ public class AgentWorker : BackgroundService
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
         try
         {
-            // Use explicit root\\cimv2 scope — required when running as SYSTEM service
-            // otherwise WMI queries can silently return empty results
             var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
             scope.Connect();
 
-            // Find the owner of explorer.exe — the most reliable interactive user indicator
-            using var searcher = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery("SELECT Handle FROM Win32_Process WHERE Name='explorer.exe'"));
-            foreach (System.Management.ManagementObject obj in searcher.Get())
+            // Win32_LogonSession with LogonType=2 = interactive sessions only.
+            // Works reliably from any service account — no process ownership queries needed.
+            using var sessions = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery(
+                    "SELECT LogonId FROM Win32_LogonSession WHERE LogonType = 2"));
+
+            foreach (System.Management.ManagementObject session in sessions.Get())
             {
-                var args = new object[] { string.Empty, string.Empty };
-                var ret = (uint)(obj.InvokeMethod("GetOwner", args) ?? 1u);
-                if (ret == 0)
+                var logonId = session["LogonId"]?.ToString();
+                if (string.IsNullOrEmpty(logonId)) continue;
+
+                // Walk the association to find who owns this logon session
+                using var assoc = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery(
+                        $"ASSOCIATORS OF {{Win32_LogonSession.LogonId='{logonId}'}} " +
+                        "WHERE AssocClass=Win32_LoggedOnUser Role=Dependent"));
+
+                foreach (System.Management.ManagementObject user in assoc.Get())
                 {
-                    var domain = args[1]?.ToString();
-                    var user   = args[0]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(user))
-                        return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
+                    var name   = user["Name"]?.ToString();
+                    var domain = user["Domain"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(name))
+                        return string.IsNullOrWhiteSpace(domain) ? name : $"{domain}\\{name}";
                 }
             }
         }
