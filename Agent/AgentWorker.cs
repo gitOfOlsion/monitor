@@ -37,33 +37,37 @@ public class AgentWorker : BackgroundService
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
         try
         {
-            var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
-            scope.Connect();
-
-            // Win32_LogonSession with LogonType=2 = interactive sessions only.
-            // Works reliably from any service account — no process ownership queries needed.
-            using var sessions = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery(
-                    "SELECT LogonId FROM Win32_LogonSession WHERE LogonType = 2"));
-
-            foreach (System.Management.ManagementObject session in sessions.Get())
+            // qwinsta (Query Windows Station) lists all active RDP/console sessions
+            // including the logged-in username. Works from any service account without
+            // any WMI permissions — confirmed working from PeripheralMonitorSvc context.
+            // Output format: "SESSIONNAME  USERNAME  ID  STATE  TYPE  DEVICE"
+            // We look for lines with STATE=Active and extract the USERNAME column.
+            var psi = new System.Diagnostics.ProcessStartInfo("qwinsta")
             {
-                var logonId = session["LogonId"]?.ToString();
-                if (string.IsNullOrEmpty(logonId)) continue;
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+                UseShellExecute        = false,
+                CreateNoWindow         = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc == null) return null;
 
-                // Walk the association to find who owns this logon session
-                using var assoc = new System.Management.ManagementObjectSearcher(scope,
-                    new System.Management.ObjectQuery(
-                        $"ASSOCIATORS OF {{Win32_LogonSession.LogonId='{logonId}'}} " +
-                        "WHERE AssocClass=Win32_LoggedOnUser Role=Dependent"));
+            var output = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(3000);
 
-                foreach (System.Management.ManagementObject user in assoc.Get())
-                {
-                    var name   = user["Name"]?.ToString();
-                    var domain = user["Domain"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(name))
-                        return string.IsNullOrWhiteSpace(domain) ? name : $"{domain}\\{name}";
-                }
+            // Parse each line looking for Active sessions with a username
+            foreach (var line in output.Split('\n'))
+            {
+                if (!line.Contains("Active", StringComparison.OrdinalIgnoreCase)) continue;
+
+                // Split on whitespace — columns: SESSIONNAME USERNAME ID STATE ...
+                var parts = line.Trim().TrimStart('>') // remove the '>' marker for current session
+                                .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+
+                // Need at least 4 columns and the username must not be numeric (avoid ID column)
+                if (parts.Length >= 4 && !string.IsNullOrWhiteSpace(parts[1])
+                    && !int.TryParse(parts[1], out _))
+                    return parts[1]; // username is always the second token
             }
         }
         catch { /* non-fatal */ }
