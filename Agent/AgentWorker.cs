@@ -37,12 +37,60 @@ public class AgentWorker : BackgroundService
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
         try
         {
-            // qwinsta (Query Windows Station) lists all active RDP/console sessions
-            // including the logged-in username. Works from any service account without
-            // any WMI permissions — confirmed working from PeripheralMonitorSvc context.
-            // Output format: "SESSIONNAME  USERNAME  ID  STATE  TYPE  DEVICE"
-            // We look for lines with STATE=Active and extract the USERNAME column.
-            var psi = new System.Diagnostics.ProcessStartInfo("qwinsta")
+            // Method 1: query user (cleaner output than qwinsta, same permissions)
+            var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            var result = RunCommand(System.IO.Path.Combine(system32, "query.exe"), "user");
+            if (!string.IsNullOrWhiteSpace(result))
+            {
+                foreach (var line in result.Split('\n'))
+                {
+                    // Skip header and empty lines
+                    if (line.Contains("USERNAME", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    // Output: ">opollogati           rdp-tcp#1    2  Active   0  8:29"
+                    var parts = line.Trim().TrimStart('>').Split(
+                        new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 1 && !string.IsNullOrWhiteSpace(parts[0]))
+                        return parts[0]; // first token is always the username
+                }
+            }
+
+            // Method 2: qwinsta fallback
+            result = RunCommand(System.IO.Path.Combine(system32, "qwinsta.exe"), "");
+            if (!string.IsNullOrWhiteSpace(result))
+            {
+                foreach (var line in result.Split('\n'))
+                {
+                    if (!line.Contains("Active", StringComparison.OrdinalIgnoreCase)) continue;
+                    var parts = line.Trim().TrimStart('>').Split(
+                        new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[1])
+                        && !int.TryParse(parts[1], out _))
+                        return parts[1];
+                }
+            }
+
+            // Method 3: WMI ComputerSystem (works on some configs)
+            var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
+            scope.Connect();
+            using var wmi = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery("SELECT UserName FROM Win32_ComputerSystem"));
+            foreach (System.Management.ManagementObject o in wmi.Get())
+            {
+                var u = o["UserName"]?.ToString();
+                if (!string.IsNullOrWhiteSpace(u)) return u.Contains('\\') ? u.Split('\\')[1] : u;
+            }
+        }
+        catch { /* non-fatal */ }
+        return null;
+    }
+
+    private static string RunCommand(string exe, string args)
+    {
+        try
+        {
+            if (!System.IO.File.Exists(exe)) return "";
+            var psi = new System.Diagnostics.ProcessStartInfo(exe, args)
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError  = true,
@@ -50,28 +98,12 @@ public class AgentWorker : BackgroundService
                 CreateNoWindow         = true
             };
             using var proc = System.Diagnostics.Process.Start(psi);
-            if (proc == null) return null;
-
+            if (proc == null) return "";
             var output = proc.StandardOutput.ReadToEnd();
             proc.WaitForExit(3000);
-
-            // Parse each line looking for Active sessions with a username
-            foreach (var line in output.Split('\n'))
-            {
-                if (!line.Contains("Active", StringComparison.OrdinalIgnoreCase)) continue;
-
-                // Split on whitespace — columns: SESSIONNAME USERNAME ID STATE ...
-                var parts = line.Trim().TrimStart('>') // remove the '>' marker for current session
-                                .Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-
-                // Need at least 4 columns and the username must not be numeric (avoid ID column)
-                if (parts.Length >= 4 && !string.IsNullOrWhiteSpace(parts[1])
-                    && !int.TryParse(parts[1], out _))
-                    return parts[1]; // username is always the second token
-            }
+            return output;
         }
-        catch { /* non-fatal */ }
-        return null;
+        catch { return ""; }
     }
 
     private static string? GetLoggedInUserLinux()
@@ -211,6 +243,8 @@ public class AgentWorker : BackgroundService
                     var snap = await _monitor.GetSnapshotAsync();
                     var loggedInUser = GetLoggedInUser();
                     var (cpu, cores, ramMb, disk) = GetHardwareInfo();
+                    _log.LogInformation("Heartbeat — {N} devices, User={User}, CPU={Cpu}",
+                        snap.Count, loggedInUser ?? "none", cpu ?? "?");
                     await _hub.SendAsync("AgentHeartbeat",
                         new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(),
                             DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk), ct);
