@@ -51,6 +51,9 @@ public class AgentWorker : BackgroundService
         public int State; // WTSConnectstateClass: 0 = Active
     }
 
+    // Diagnostic info from the last GetLoggedInUser call, logged in heartbeat
+    private static string _userDiag = "";
+
     private static string? GetLoggedInUser()
     {
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
@@ -65,32 +68,41 @@ public class AgentWorker : BackgroundService
             int count = 0;
             const int WTSUserName = 5;
             const int WTSDomainName = 7;
-            const int Active = 0;
 
-            if (WTSEnumerateSessions(server, 0, 1, ref sessionInfo, ref count) != 0)
+            int enumResult = WTSEnumerateSessions(server, 0, 1, ref sessionInfo, ref count);
+            if (enumResult == 0)
             {
+                _userDiag = $"WTSEnum failed err={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}";
+            }
+            else
+            {
+                var diag = new System.Text.StringBuilder($"WTS sessions={count}: ");
                 try
                 {
                     var dataSize = System.Runtime.InteropServices.Marshal.SizeOf<WTS_SESSION_INFO>();
                     var current = sessionInfo;
+                    string? foundUser = null;
                     for (int i = 0; i < count; i++)
                     {
                         var si = System.Runtime.InteropServices.Marshal.PtrToStructure<WTS_SESSION_INFO>(current);
                         current = IntPtr.Add(current, dataSize);
 
-                        if (si.State != Active) continue; // only Active sessions
-
                         string? user = QueryWtsString(server, si.SessionId, WTSUserName);
-                        if (string.IsNullOrWhiteSpace(user)) continue; // skip sessions with no user
+                        diag.Append($"[id={si.SessionId},state={si.State},user='{user}'] ");
 
-                        string? domain = QueryWtsString(server, si.SessionId, WTSDomainName);
-                        return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
+                        if (foundUser == null && !string.IsNullOrWhiteSpace(user))
+                        {
+                            var domain = QueryWtsString(server, si.SessionId, WTSDomainName);
+                            foundUser = string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
+                        }
                     }
+                    _userDiag = diag.ToString();
+                    if (foundUser != null) return foundUser;
                 }
                 finally { WTSFreeMemory(sessionInfo); }
             }
         }
-        catch { /* fall through to command-line methods */ }
+        catch (Exception ex) { _userDiag = $"WTS exception: {ex.Message}"; }
 
         // FALLBACK: query user / qwinsta (works if somehow running interactively)
         try
@@ -277,8 +289,8 @@ public class AgentWorker : BackgroundService
                     var snap = await _monitor.GetSnapshotAsync();
                     var loggedInUser = GetLoggedInUser();
                     var (cpu, cores, ramMb, disk) = GetHardwareInfo();
-                    _log.LogInformation("Heartbeat — {N} devices, User={User}, CPU={Cpu}",
-                        snap.Count, loggedInUser ?? "none", cpu ?? "?");
+                    _log.LogInformation("Heartbeat — {N} devices, User={User}, Diag={Diag}",
+                        snap.Count, loggedInUser ?? "none", _userDiag);
                     await _hub.SendAsync("AgentHeartbeat",
                         new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(),
                             DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk), ct);
