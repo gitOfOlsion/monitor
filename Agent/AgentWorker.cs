@@ -33,22 +33,22 @@ public class AgentWorker : BackgroundService
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     // ── Win32 Terminal Services API (works from Session 0 services) ─────────
-    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true)]
+    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "WTSEnumerateSessionsW")]
     private static extern int WTSEnumerateSessions(IntPtr hServer, int Reserved, int Version, ref IntPtr ppSessionInfo, ref int pCount);
 
-    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true)]
+    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "WTSQuerySessionInformationW")]
     private static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
 
     [System.Runtime.InteropServices.DllImport("wtsapi32.dll")]
     private static extern void WTSFreeMemory(IntPtr pMemory);
 
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private struct WTS_SESSION_INFO
     {
         public int SessionId;
-        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStr)]
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)]
         public string pWinStationName;
-        public int State; // WTSConnectstateClass: 0 = Active
+        public int State;
     }
 
     // Diagnostic info from the last GetLoggedInUser call, logged in heartbeat
@@ -123,9 +123,9 @@ public class AgentWorker : BackgroundService
 
     private static string? QueryWtsString(IntPtr server, int sessionId, int infoClass)
     {
-        if (WTSQuerySessionInformation(server, sessionId, infoClass, out var buffer, out var bytes) && bytes > 1)
+        if (WTSQuerySessionInformation(server, sessionId, infoClass, out var buffer, out var bytes) && bytes > 2)
         {
-            try { return System.Runtime.InteropServices.Marshal.PtrToStringAnsi(buffer); }
+            try { return System.Runtime.InteropServices.Marshal.PtrToStringUni(buffer); }
             finally { WTSFreeMemory(buffer); }
         }
         return null;
