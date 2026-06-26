@@ -32,56 +32,90 @@ public class AgentWorker : BackgroundService
     { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; }
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
+    // ── Win32 Terminal Services API (works from Session 0 services) ─────────
+    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern int WTSEnumerateSessions(IntPtr hServer, int Reserved, int Version, ref IntPtr ppSessionInfo, ref int pCount);
+
+    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true)]
+    private static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
+
+    [System.Runtime.InteropServices.DllImport("wtsapi32.dll")]
+    private static extern void WTSFreeMemory(IntPtr pMemory);
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct WTS_SESSION_INFO
+    {
+        public int SessionId;
+        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPStr)]
+        public string pWinStationName;
+        public int State; // WTSConnectstateClass: 0 = Active
+    }
+
     private static string? GetLoggedInUser()
     {
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
+
+        // PRIMARY: WTS API. This is the only approach that reliably enumerates
+        // interactive user sessions from a Session 0 service. query/qwinsta/WMI
+        // all run in the service's own (empty) session context and return nothing.
         try
         {
-            // Method 1: query user (cleaner output than qwinsta, same permissions)
+            IntPtr server = IntPtr.Zero; // WTS_CURRENT_SERVER_HANDLE
+            IntPtr sessionInfo = IntPtr.Zero;
+            int count = 0;
+            const int WTSUserName = 5;
+            const int WTSDomainName = 7;
+            const int Active = 0;
+
+            if (WTSEnumerateSessions(server, 0, 1, ref sessionInfo, ref count) != 0)
+            {
+                try
+                {
+                    var dataSize = System.Runtime.InteropServices.Marshal.SizeOf<WTS_SESSION_INFO>();
+                    var current = sessionInfo;
+                    for (int i = 0; i < count; i++)
+                    {
+                        var si = System.Runtime.InteropServices.Marshal.PtrToStructure<WTS_SESSION_INFO>(current);
+                        current = IntPtr.Add(current, dataSize);
+
+                        if (si.State != Active) continue; // only Active sessions
+
+                        string? user = QueryWtsString(server, si.SessionId, WTSUserName);
+                        if (string.IsNullOrWhiteSpace(user)) continue; // skip sessions with no user
+
+                        string? domain = QueryWtsString(server, si.SessionId, WTSDomainName);
+                        return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
+                    }
+                }
+                finally { WTSFreeMemory(sessionInfo); }
+            }
+        }
+        catch { /* fall through to command-line methods */ }
+
+        // FALLBACK: query user / qwinsta (works if somehow running interactively)
+        try
+        {
             var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
             var result = RunCommand(System.IO.Path.Combine(system32, "query.exe"), "user");
             if (!string.IsNullOrWhiteSpace(result))
-            {
                 foreach (var line in result.Split('\n'))
                 {
-                    // Skip header and empty lines
-                    if (line.Contains("USERNAME", StringComparison.OrdinalIgnoreCase)) continue;
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-                    // Output: ">opollogati           rdp-tcp#1    2  Active   0  8:29"
-                    var parts = line.Trim().TrimStart('>').Split(
-                        new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 1 && !string.IsNullOrWhiteSpace(parts[0]))
-                        return parts[0]; // first token is always the username
+                    if (line.Contains("USERNAME", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Trim().TrimStart('>').Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 1 && !string.IsNullOrWhiteSpace(parts[0])) return parts[0];
                 }
-            }
-
-            // Method 2: qwinsta fallback
-            result = RunCommand(System.IO.Path.Combine(system32, "qwinsta.exe"), "");
-            if (!string.IsNullOrWhiteSpace(result))
-            {
-                foreach (var line in result.Split('\n'))
-                {
-                    if (!line.Contains("Active", StringComparison.OrdinalIgnoreCase)) continue;
-                    var parts = line.Trim().TrimStart('>').Split(
-                        new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length >= 3 && !string.IsNullOrWhiteSpace(parts[1])
-                        && !int.TryParse(parts[1], out _))
-                        return parts[1];
-                }
-            }
-
-            // Method 3: WMI ComputerSystem (works on some configs)
-            var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
-            scope.Connect();
-            using var wmi = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery("SELECT UserName FROM Win32_ComputerSystem"));
-            foreach (System.Management.ManagementObject o in wmi.Get())
-            {
-                var u = o["UserName"]?.ToString();
-                if (!string.IsNullOrWhiteSpace(u)) return u.Contains('\\') ? u.Split('\\')[1] : u;
-            }
         }
-        catch { /* non-fatal */ }
+        catch { }
+        return null;
+    }
+
+    private static string? QueryWtsString(IntPtr server, int sessionId, int infoClass)
+    {
+        if (WTSQuerySessionInformation(server, sessionId, infoClass, out var buffer, out var bytes) && bytes > 1)
+        {
+            try { return System.Runtime.InteropServices.Marshal.PtrToStringAnsi(buffer); }
+            finally { WTSFreeMemory(buffer); }
+        }
         return null;
     }
 
