@@ -56,29 +56,45 @@ public class AgentWorker : BackgroundService
         // any session that has a logged-in username (covers RDP sessions too).
         const int WTSUserName = 5;
         const int WTSDomainName = 7;
+        const int WTSWinStationName = 6;
         IntPtr server = IntPtr.Zero;
 
         var diag = new System.Text.StringBuilder();
         try
         {
-            // Build the list of candidate session IDs: active console first, then 0-10
-            var candidates = new List<int>();
+            // Probe sessions 0..30 (covers high console session numbers from repeated RDP).
             int activeConsole = WTSGetActiveConsoleSessionId();
+            var candidates = new List<int>();
             if (activeConsole >= 0 && activeConsole != 0xFFFFFFF) candidates.Add(activeConsole);
-            for (int s = 1; s <= 10; s++) if (!candidates.Contains(s)) candidates.Add(s);
+            for (int s = 0; s <= 30; s++) if (!candidates.Contains(s)) candidates.Add(s);
 
             foreach (var sid in candidates)
             {
-                var user = QueryWtsString(server, sid, WTSUserName);
+                // Query username with explicit byte-count tracking
+                bool ok = WTSQuerySessionInformation(server, sid, WTSUserName, out var buf, out var bytes);
+                string? user = null;
+                if (ok && bytes > 2)
+                {
+                    user = System.Runtime.InteropServices.Marshal.PtrToStringUni(buf);
+                    WTSFreeMemory(buf);
+                }
+                else if (ok) { WTSFreeMemory(buf); }
+
                 if (!string.IsNullOrWhiteSpace(user))
                 {
-                    diag.Append($"[sid={sid},user='{user}'] ");
                     var domain = QueryWtsString(server, sid, WTSDomainName);
-                    _userDiag = $"console={activeConsole} {diag}";
+                    _userDiag = $"FOUND console={activeConsole} sid={sid} user={user}";
                     return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
                 }
+
+                // For the active console session, capture detailed diagnostics
+                if (sid == activeConsole)
+                {
+                    var win = QueryWtsString(server, sid, WTSWinStationName);
+                    diag.Append($"console{sid}(ok={ok},bytes={bytes},win='{win}') ");
+                }
             }
-            _userDiag = $"console={activeConsole}, no user in sessions {string.Join(",", candidates)}";
+            _userDiag = $"NO USER. console={activeConsole}. {diag}";
         }
         catch (Exception ex) { _userDiag = $"WTS exception: {ex.Message}"; }
 
