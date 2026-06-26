@@ -170,13 +170,50 @@ if (-not (Test-Path $InstallPath)) {
 New-Item -ItemType Directory -Path "$InstallPath\logs" -Force | Out-Null
 New-Item -ItemType Directory -Path "$InstallPath\data" -Force | Out-Null
 
+# ----------------------------------------------------------------------
+# CRITICAL: Stop the service BEFORE copying files. A running service holds
+# PeripheralMonitor.Agent.exe open, which makes Copy-Item silently skip the
+# overwrite - leaving the OLD binary in place. This is the #1 cause of
+# "I reinstalled but nothing changed" problems.
+# ----------------------------------------------------------------------
+$existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($existingSvc) {
+    Write-Step "Stopping existing service '$ServiceName' before copying files..."
+    Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
+
+    # Wait up to 15s for it to fully stop (so the binary is released)
+    $waited = 0
+    while ((Get-Service -Name $ServiceName -ErrorAction SilentlyContinue).Status -ne 'Stopped' -and $waited -lt 15) {
+        Start-Sleep -Seconds 1
+        $waited++
+    }
+
+    # Also kill any lingering agent process not managed by SCM, just in case
+    Get-Process -Name 'PeripheralMonitor.Agent' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+    Write-Ok "Service stopped (binary released for overwrite)"
+}
+
 $scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
 $agentFiles = Get-ChildItem $scriptDir -Exclude 'install.ps1','install.bat','install.sh','*.service','*.rules'
 
 foreach ($file in $agentFiles) {
     Copy-Item $file.FullName -Destination $InstallPath -Recurse -Force
 }
-Write-Ok "Agent files copied to $InstallPath"
+
+# Verify the agent binary was actually overwritten (compare write times)
+$exeCheck = Join-Path $InstallPath 'PeripheralMonitor.Agent.exe'
+if (Test-Path $exeCheck) {
+    $age = (Get-Date) - (Get-Item $exeCheck).LastWriteTime
+    if ($age.TotalMinutes -gt 60) {
+        Write-Warn "WARNING: Agent binary is $([int]$age.TotalMinutes) min old - the copy may not have overwritten a locked file. Check that the service was stopped."
+    } else {
+        Write-Ok "Agent files copied to $InstallPath (binary is fresh)"
+    }
+} else {
+    Write-Fail "Agent binary missing after copy - installation cannot continue"
+    exit 1
+}
 
 # ======================================================================
 # STEP 4: Set folder permissions

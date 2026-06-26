@@ -33,23 +33,14 @@ public class AgentWorker : BackgroundService
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     // ── Win32 Terminal Services API (works from Session 0 services) ─────────
-    [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "WTSEnumerateSessionsW")]
-    private static extern int WTSEnumerateSessions(IntPtr hServer, int Reserved, int Version, ref IntPtr ppSessionInfo, ref int pCount);
-
     [System.Runtime.InteropServices.DllImport("wtsapi32.dll", SetLastError = true, CharSet = System.Runtime.InteropServices.CharSet.Unicode, EntryPoint = "WTSQuerySessionInformationW")]
     private static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int wtsInfoClass, out IntPtr ppBuffer, out int pBytesReturned);
 
     [System.Runtime.InteropServices.DllImport("wtsapi32.dll")]
     private static extern void WTSFreeMemory(IntPtr pMemory);
 
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private struct WTS_SESSION_INFO
-    {
-        public int SessionId;
-        [System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.LPWStr)]
-        public string pWinStationName;
-        public int State;
-    }
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern int WTSGetActiveConsoleSessionId();
 
     // Diagnostic info from the last GetLoggedInUser call, logged in heartbeat
     private static string _userDiag = "";
@@ -58,53 +49,40 @@ public class AgentWorker : BackgroundService
     {
         if (!OperatingSystem.IsWindows()) return GetLoggedInUserLinux();
 
-        // PRIMARY: WTS API. This is the only approach that reliably enumerates
-        // interactive user sessions from a Session 0 service. query/qwinsta/WMI
-        // all run in the service's own (empty) session context and return nothing.
+        // Probe session IDs directly with WTSQuerySessionInformation. Unlike
+        // WTSEnumerateSessions (which returns ERROR_NO_MORE_ITEMS / 259 from a
+        // Session 0 service), per-session queries work fine. We check the active
+        // console session first, then scan a reasonable range of session IDs for
+        // any session that has a logged-in username (covers RDP sessions too).
+        const int WTSUserName = 5;
+        const int WTSDomainName = 7;
+        IntPtr server = IntPtr.Zero;
+
+        var diag = new System.Text.StringBuilder();
         try
         {
-            IntPtr server = IntPtr.Zero; // WTS_CURRENT_SERVER_HANDLE
-            IntPtr sessionInfo = IntPtr.Zero;
-            int count = 0;
-            const int WTSUserName = 5;
-            const int WTSDomainName = 7;
+            // Build the list of candidate session IDs: active console first, then 0-10
+            var candidates = new List<int>();
+            int activeConsole = WTSGetActiveConsoleSessionId();
+            if (activeConsole >= 0 && activeConsole != 0xFFFFFFF) candidates.Add(activeConsole);
+            for (int s = 1; s <= 10; s++) if (!candidates.Contains(s)) candidates.Add(s);
 
-            int enumResult = WTSEnumerateSessions(server, 0, 1, ref sessionInfo, ref count);
-            if (enumResult == 0)
+            foreach (var sid in candidates)
             {
-                _userDiag = $"WTSEnum failed err={System.Runtime.InteropServices.Marshal.GetLastWin32Error()}";
-            }
-            else
-            {
-                var diag = new System.Text.StringBuilder($"WTS sessions={count}: ");
-                try
+                var user = QueryWtsString(server, sid, WTSUserName);
+                if (!string.IsNullOrWhiteSpace(user))
                 {
-                    var dataSize = System.Runtime.InteropServices.Marshal.SizeOf<WTS_SESSION_INFO>();
-                    var current = sessionInfo;
-                    string? foundUser = null;
-                    for (int i = 0; i < count; i++)
-                    {
-                        var si = System.Runtime.InteropServices.Marshal.PtrToStructure<WTS_SESSION_INFO>(current);
-                        current = IntPtr.Add(current, dataSize);
-
-                        string? user = QueryWtsString(server, si.SessionId, WTSUserName);
-                        diag.Append($"[id={si.SessionId},state={si.State},user='{user}'] ");
-
-                        if (foundUser == null && !string.IsNullOrWhiteSpace(user))
-                        {
-                            var domain = QueryWtsString(server, si.SessionId, WTSDomainName);
-                            foundUser = string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
-                        }
-                    }
-                    _userDiag = diag.ToString();
-                    if (foundUser != null) return foundUser;
+                    diag.Append($"[sid={sid},user='{user}'] ");
+                    var domain = QueryWtsString(server, sid, WTSDomainName);
+                    _userDiag = $"console={activeConsole} {diag}";
+                    return string.IsNullOrWhiteSpace(domain) ? user : $"{domain}\\{user}";
                 }
-                finally { WTSFreeMemory(sessionInfo); }
             }
+            _userDiag = $"console={activeConsole}, no user in sessions {string.Join(",", candidates)}";
         }
         catch (Exception ex) { _userDiag = $"WTS exception: {ex.Message}"; }
 
-        // FALLBACK: query user / qwinsta (works if somehow running interactively)
+        // FALLBACK: query user (works if somehow running interactively)
         try
         {
             var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
