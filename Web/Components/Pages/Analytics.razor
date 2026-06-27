@@ -1,0 +1,219 @@
+@page "/analytics"
+@attribute [Authorize]
+@implements IAsyncDisposable
+@using System.Security.Claims
+@inject ServerApiClient Api
+@inject RealtimeService Realtime
+@inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
+
+<PageTitle>Event Analytics</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Event Analytics</h1>
+    <div class="pm-filters">
+        <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/events">☰ Event list</a>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="pm-loading">Loading analytics…</div>
+}
+else if (_events.Count == 0)
+{
+    <div class="pm-empty">No events to analyse yet.</div>
+}
+else
+{
+    <div class="pm-analytics-grid">
+
+        <!-- Summary stat cards -->
+        <div class="pm-stat-card">
+            <div class="pm-stat-value">@_events.Count</div>
+            <div class="pm-stat-label">Total events</div>
+        </div>
+        <div class="pm-stat-card">
+            <div class="pm-stat-value">@_events.Select(e => e.MachineName).Distinct().Count()</div>
+            <div class="pm-stat-label">Machines reporting</div>
+        </div>
+        <div class="pm-stat-card">
+            <div class="pm-stat-value">@_events.Count(e => e.EventType.Equals("Connected", StringComparison.OrdinalIgnoreCase))</div>
+            <div class="pm-stat-label">Connect events</div>
+        </div>
+        <div class="pm-stat-card">
+            <div class="pm-stat-value">@_events.Count(e => e.EventType.Equals("Disconnected", StringComparison.OrdinalIgnoreCase))</div>
+            <div class="pm-stat-label">Disconnect events</div>
+        </div>
+
+        <!-- Events over time (last 24h by hour) -->
+        <div class="pm-chart-card pm-chart-wide">
+            <h3>Events over time (last 24 hours)</h3>
+            @RenderTimeBars()
+        </div>
+
+        <!-- Category breakdown donut -->
+        <div class="pm-chart-card">
+            <h3>By category</h3>
+            @RenderDonut()
+        </div>
+
+        <!-- Top machines -->
+        <div class="pm-chart-card">
+            <h3>Top machines by event volume</h3>
+            @RenderTopMachines()
+        </div>
+
+    </div>
+}
+
+@code {
+    private List<DeviceChangedPayload> _events = [];
+    private bool _loading = true;
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    // Color palette for categories (CSS-var-friendly hex)
+    private static readonly string[] Palette =
+        { "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6", "#f97316", "#6366f1", "#84cc16" };
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var db = await Api.GetEventsAsync(1000) ?? [];
+        _events = db.Select(e => new DeviceChangedPayload(
+            e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
+            e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
+        _loading = false;
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
+        var inst = auth.User.FindFirst("institution_id")?.Value;
+        await Realtime.EnsureConnectedAsync(role, inst);
+        Realtime.OnDeviceChanged += OnLive;
+    }
+
+    private void OnLive(DeviceChangedPayload p)
+    {
+        _events.Insert(0, p);
+        if (_events.Count > 1000) _events.RemoveAt(1000);
+        InvokeAsync(StateHasChanged);
+    }
+
+    // ── Time bars: events bucketed by hour for the last 24h ──────────────
+    private RenderFragment RenderTimeBars() => builder =>
+    {
+        var now = DateTime.UtcNow.Add(_tzOffset);
+        var buckets = new int[24];
+        foreach (var e in _events)
+        {
+            var local = e.Timestamp.Add(_tzOffset);
+            var hoursAgo = (int)(now - local).TotalHours;
+            if (hoursAgo >= 0 && hoursAgo < 24) buckets[23 - hoursAgo]++;
+        }
+        var max = Math.Max(1, buckets.Max());
+        const int w = 640, h = 180, padB = 24, padL = 28;
+        var barW = (w - padL) / 24.0;
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<svg viewBox=\"0 0 {w} {h}\" class=\"pm-svg\" preserveAspectRatio=\"xMidYMid meet\">");
+        // y gridlines
+        for (int g = 0; g <= 2; g++)
+        {
+            var val = max * g / 2;
+            var y = h - padB - (h - padB - 10) * g / 2.0;
+            sb.Append($"<line x1=\"{padL}\" y1=\"{y:F1}\" x2=\"{w}\" y2=\"{y:F1}\" stroke=\"var(--border)\" stroke-width=\"1\"/>");
+            sb.Append($"<text x=\"0\" y=\"{y + 4:F1}\" font-size=\"10\" fill=\"var(--text-muted)\">{val}</text>");
+        }
+        for (int i = 0; i < 24; i++)
+        {
+            var bh = (h - padB - 10) * (buckets[i] / (double)max);
+            var x = padL + i * barW;
+            var y = h - padB - bh;
+            sb.Append($"<rect x=\"{x + 1:F1}\" y=\"{y:F1}\" width=\"{barW - 2:F1}\" height=\"{bh:F1}\" rx=\"2\" fill=\"#3b82f6\"><title>{buckets[i]} events</title></rect>");
+        }
+        sb.Append($"<text x=\"{padL}\" y=\"{h - 6}\" font-size=\"10\" fill=\"var(--text-muted)\">24h ago</text>");
+        sb.Append($"<text x=\"{w - 24}\" y=\"{h - 6}\" font-size=\"10\" fill=\"var(--text-muted)\">now</text>");
+        sb.Append("</svg>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
+    // ── Donut: events by category ────────────────────────────────────────
+    private RenderFragment RenderDonut() => builder =>
+    {
+        var groups = _events.GroupBy(e => string.IsNullOrWhiteSpace(e.Category) ? "Other" : e.Category)
+                            .Select(g => (Cat: g.Key, Count: g.Count()))
+                            .OrderByDescending(x => x.Count).ToList();
+        var total = groups.Sum(g => g.Count);
+        if (total == 0) { builder.AddMarkupContent(0, "<div class='pm-empty'>No data</div>"); return; }
+
+        const int size = 180, cx = 90, cy = 90, r = 70, stroke = 28;
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"pm-donut-wrap\"><svg viewBox=\"0 0 {size} {size}\" class=\"pm-svg-donut\">");
+        double angle = -90;
+        int ci = 0;
+        foreach (var g in groups)
+        {
+            var frac = g.Count / (double)total;
+            var sweep = frac * 360;
+            var (x1, y1) = PointOnCircle(cx, cy, r, angle);
+            var (x2, y2) = PointOnCircle(cx, cy, r, angle + sweep);
+            var large = sweep > 180 ? 1 : 0;
+            var color = Palette[ci % Palette.Length];
+            sb.Append($"<path d=\"M {x1:F2} {y1:F2} A {r} {r} 0 {large} 1 {x2:F2} {y2:F2}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{stroke}\"><title>{g.Cat}: {g.Count}</title></path>");
+            angle += sweep;
+            ci++;
+        }
+        sb.Append($"<text x=\"{cx}\" y=\"{cy - 2}\" text-anchor=\"middle\" font-size=\"22\" font-weight=\"700\" fill=\"var(--text)\">{total}</text>");
+        sb.Append($"<text x=\"{cx}\" y=\"{cy + 16}\" text-anchor=\"middle\" font-size=\"10\" fill=\"var(--text-muted)\">events</text>");
+        sb.Append("</svg><div class=\"pm-legend\">");
+        ci = 0;
+        foreach (var g in groups)
+        {
+            var color = Palette[ci % Palette.Length];
+            var pct = 100.0 * g.Count / total;
+            sb.Append($"<div class=\"pm-legend-item\"><span class=\"pm-legend-dot\" style=\"background:{color}\"></span>{g.Cat} <span class=\"pm-legend-val\">{g.Count} ({pct:F0}%)</span></div>");
+            ci++;
+        }
+        sb.Append("</div></div>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
+    // ── Horizontal bars: top machines ────────────────────────────────────
+    private RenderFragment RenderTopMachines() => builder =>
+    {
+        var groups = _events.GroupBy(e => e.MachineName)
+                            .Select(g => (Machine: g.Key, Count: g.Count()))
+                            .OrderByDescending(x => x.Count).Take(8).ToList();
+        if (groups.Count == 0) { builder.AddMarkupContent(0, "<div class='pm-empty'>No data</div>"); return; }
+        var max = groups.Max(g => g.Count);
+
+        var sb = new System.Text.StringBuilder("<div class=\"pm-hbars\">");
+        foreach (var g in groups)
+        {
+            var pct = 100.0 * g.Count / max;
+            sb.Append($"<div class=\"pm-hbar-row\"><span class=\"pm-hbar-label\" title=\"{g.Machine}\">{g.Machine}</span>");
+            sb.Append($"<span class=\"pm-hbar-track\"><span class=\"pm-hbar-fill\" style=\"width:{pct:F1}%\"></span></span>");
+            sb.Append($"<span class=\"pm-hbar-val\">{g.Count}</span></div>");
+        }
+        sb.Append("</div>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
+    private static (double, double) PointOnCircle(int cx, int cy, int r, double angleDeg)
+    {
+        var rad = angleDeg * Math.PI / 180.0;
+        return (cx + r * Math.Cos(rad), cy + r * Math.Sin(rad));
+    }
+
+    public async ValueTask DisposeAsync() { Realtime.OnDeviceChanged -= OnLive; await Task.CompletedTask; }
+}
