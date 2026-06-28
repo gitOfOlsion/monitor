@@ -383,6 +383,10 @@ public class AgentWorker : BackgroundService
         return (idle, total);
     }
 
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        _log.LogInformation("Agent starting — {Machine} | {Mac} | {Platform}", _machineName, _macAddress, _platform);
+
         var token = await ResolveTokenAsync(ct);
         if (token == null)
         {
