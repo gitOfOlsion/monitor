@@ -45,13 +45,36 @@ public class AgentsController : ScopedController
     private readonly IHubContext<MonitorHub> _hub;
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpFactory;
+    private readonly MetricsService _metrics;
     private readonly ILogger<AgentsController> _log;
 
-    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config, IHttpClientFactory httpFactory, ILogger<AgentsController> log)
-    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; _httpFactory = httpFactory; _log = log; }
+    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config, IHttpClientFactory httpFactory, MetricsService metrics, ILogger<AgentsController> log)
+    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; _httpFactory = httpFactory; _metrics = metrics; _log = log; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
+
+    /// <summary>Live utilisation metrics + sparkline history for all in-scope agents.</summary>
+    [HttpGet("metrics")]
+    public async Task<IActionResult> GetMetrics()
+    {
+        var agents = await _svc.GetAgentsAsync(Caller().Scope);
+        var result = agents.Where(a => a.Status == "Approved").Select(a =>
+        {
+            var (cpu, ram, disk, ramUsedMb, cpuHist, ramHist) = _metrics.Get(a.Id);
+            return new AgentMetricsDto
+            {
+                AgentId = a.Id, MachineName = a.MachineName, Platform = a.Platform,
+                Online = _connections.IsOnline(a.Id),
+                CpuName = a.CpuName, CpuCores = a.CpuCores, RamMb = a.RamMb,
+                DiskInfo = a.DiskInfo, LoggedInUser = a.LoggedInUser,
+                CpuPercent = cpu, RamPercent = ram, DiskPercent = disk, RamUsedMb = ramUsedMb,
+                LastHeartbeat = a.LastHeartbeat,
+                CpuHistory = cpuHist, RamHistory = ramHist
+            };
+        }).ToList();
+        return Ok(result);
+    }
 
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> Approve(Guid id)

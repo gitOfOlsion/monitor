@@ -76,6 +76,7 @@ try
     builder.Services.AddScoped<AgentService>();
     builder.Services.AddSingleton<AgentConnectionRegistry>();
     builder.Services.AddSingleton<TunnelManager>();
+    builder.Services.AddSingleton<MetricsService>();
     builder.Services.AddHttpClient();
     builder.Services.AddScoped<UserService>();
     builder.Services.AddScoped<AuditService>();

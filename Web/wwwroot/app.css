@@ -358,3 +358,34 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
     .pm-analytics-grid { grid-template-columns: repeat(2, 1fr); }
     .pm-chart-card, .pm-chart-wide { grid-column: span 2; }
 }
+
+/* ── System Metrics dashboard ────────────────────────────────────────── */
+.pm-metrics-live { color: #10b981; font-weight: 700; font-size: .8rem; letter-spacing: .05em; animation: pm-pulse 2s ease-in-out infinite; }
+@keyframes pm-pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+.pm-metrics-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem; margin-top: 1rem; }
+
+.pm-metric-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.1rem; display: flex; flex-direction: column; gap: .85rem;
+}
+.pm-metric-offline { opacity: .55; }
+.pm-metric-head { display: flex; justify-content: space-between; align-items: flex-start; }
+.pm-metric-machine { font-weight: 700; font-size: 1rem; }
+.pm-metric-sub { font-size: .76rem; color: var(--text-muted); margin-top: 2px; }
+.pm-metric-status { font-size: .65rem; font-weight: 700; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; }
+.pm-metric-status.on  { background: #dcfce7; color: #15803d; }
+.pm-metric-status.off { background: #fee2e2; color: #b91c1c; }
+
+.pm-gauges { display: flex; justify-content: space-around; gap: .5rem; }
+.pm-gauge { text-align: center; }
+.pm-gauge svg { width: 72px; height: 72px; }
+.pm-gauge-label { font-size: .68rem; color: var(--text-muted); font-weight: 600; letter-spacing: .04em; margin-top: 2px; }
+
+.pm-metric-specs { font-size: .76rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
+.pm-metric-specs > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pm-sparklines { display: flex; flex-direction: column; gap: 4px; }
+.pm-spark-row { display: flex; align-items: center; gap: .5rem; }
+.pm-spark-label { font-size: .62rem; color: var(--text-muted); width: 28px; font-weight: 600; }
+.pm-spark { width: 100%; height: 30px; background: var(--bg); border-radius: 4px; }

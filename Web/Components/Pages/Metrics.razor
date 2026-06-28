@@ -1,0 +1,163 @@
+@page "/metrics"
+@attribute [Authorize]
+@implements IDisposable
+@using System.Security.Claims
+@inject ServerApiClient Api
+@inject TimeZoneService TZ
+
+<PageTitle>System Metrics</PageTitle>
+
+<div class="pm-page-header">
+    <h1>System Metrics</h1>
+    <div class="pm-filters">
+        <span class="pm-metrics-live">● LIVE</span>
+        <input class="pm-input pm-input-sm" @bind="_filter" @bind:event="oninput" placeholder="Filter machine…" />
+    </div>
+</div>
+
+<p class="pm-hint" style="margin:0 0 1rem 0">
+    Live CPU, memory and disk utilisation, refreshed every few seconds. Sparklines show the last ~10 minutes.
+</p>
+
+@if (_loading)
+{
+    <div class="pm-loading">Loading metrics…</div>
+}
+else if (Filtered.Count == 0)
+{
+    <div class="pm-empty">No approved agents to show metrics for.</div>
+}
+else
+{
+    <div class="pm-metrics-grid">
+        @foreach (var m in Filtered)
+        {
+            <div class="pm-metric-card @(m.Online ? "" : "pm-metric-offline")">
+                <div class="pm-metric-head">
+                    <div>
+                        <div class="pm-metric-machine">@m.MachineName</div>
+                        <div class="pm-metric-sub">
+                            @(m.Platform) · @(m.LoggedInUser ?? "no user")
+                        </div>
+                    </div>
+                    <span class="pm-metric-status @(m.Online ? "on" : "off")">
+                        @(m.Online ? "ONLINE" : "OFFLINE")
+                    </span>
+                </div>
+
+                <div class="pm-gauges">
+                    @Gauge("CPU", m.CpuPercent, "#3b82f6")
+                    @Gauge("RAM", m.RamPercent, "#10b981")
+                    @Gauge("DISK", m.DiskPercent, "#f59e0b")
+                </div>
+
+                <div class="pm-metric-specs">
+                    @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
+                    @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
+                    @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo</div> }
+                </div>
+
+                <div class="pm-sparklines">
+                    <div class="pm-spark-row">
+                        <span class="pm-spark-label">CPU</span>
+                        @Sparkline(m.CpuHistory, "#3b82f6")
+                    </div>
+                    <div class="pm-spark-row">
+                        <span class="pm-spark-label">RAM</span>
+                        @Sparkline(m.RamHistory, "#10b981")
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<AgentMetricsDto> _metrics = [];
+    private bool _loading = true;
+    private string _filter = "";
+    private System.Threading.Timer? _timer;
+
+    private List<AgentMetricsDto> Filtered =>
+        _metrics.Where(m => string.IsNullOrWhiteSpace(_filter) ||
+                            m.MachineName.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(m => m.Online).ThenBy(m => m.MachineName).ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        _loading = false;
+        // Poll every 5 seconds for fresh metrics
+        _timer = new System.Threading.Timer(async _ =>
+        {
+            await Load();
+            await InvokeAsync(StateHasChanged);
+        }, null, 5000, 5000);
+    }
+
+    private async Task Load()
+    {
+        try { _metrics = await Api.GetMetricsAsync() ?? []; }
+        catch { /* keep last good data */ }
+    }
+
+    // ── Circular gauge ───────────────────────────────────────────────────
+    private RenderFragment Gauge(string label, double? pct, string color) => builder =>
+    {
+        var v = pct ?? 0;
+        const int size = 72, cx = 36, cy = 36, r = 30, stroke = 7;
+        var circ = 2 * Math.PI * r;
+        var filled = circ * (v / 100.0);
+        var gap = circ - filled;
+        // Color shifts to amber/red as utilisation climbs
+        var c = v >= 90 ? "#ef4444" : v >= 75 ? "#f59e0b" : color;
+        var display = pct.HasValue ? $"{v:F0}%" : "—";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"pm-gauge\"><svg viewBox=\"0 0 {size} {size}\">");
+        sb.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"none\" stroke=\"var(--border)\" stroke-width=\"{stroke}\"/>");
+        sb.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"none\" stroke=\"{c}\" stroke-width=\"{stroke}\" " +
+                  $"stroke-dasharray=\"{filled:F2} {gap:F2}\" stroke-dashoffset=\"{circ / 4:F2}\" stroke-linecap=\"round\" " +
+                  $"transform=\"rotate(-90 {cx} {cy})\"/>");
+        sb.Append($"<text x=\"{cx}\" y=\"{cy + 4}\" text-anchor=\"middle\" font-size=\"15\" font-weight=\"700\" fill=\"var(--text)\">{display}</text>");
+        sb.Append($"</svg><div class=\"pm-gauge-label\">{label}</div></div>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
+    // ── Sparkline ─────────────────────────────────────────────────────────
+    private RenderFragment Sparkline(List<double> data, string color) => builder =>
+    {
+        if (data == null || data.Count < 2)
+        {
+            builder.AddMarkupContent(0, "<svg class=\"pm-spark\" viewBox=\"0 0 200 30\"></svg>");
+            return;
+        }
+        const int w = 200, h = 30;
+        var max = Math.Max(1.0, data.Max());
+        var step = (double)w / (data.Count - 1);
+        var pts = new System.Text.StringBuilder();
+        for (int i = 0; i < data.Count; i++)
+        {
+            var x = i * step;
+            var y = h - (data[i] / max) * (h - 4) - 2;
+            pts.Append($"{x:F1},{y:F1} ");
+        }
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<svg class=\"pm-spark\" viewBox=\"0 0 {w} {h}\" preserveAspectRatio=\"none\">");
+        sb.Append($"<polyline points=\"{pts}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"1.5\"/>");
+        sb.Append($"<text x=\"{w - 2}\" y=\"10\" text-anchor=\"end\" font-size=\"9\" fill=\"var(--text-muted)\">{data[^1]:F0}%</text>");
+        sb.Append("</svg>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
+    private static string ShortCpu(string name)
+    {
+        name = name.Replace("(R)", "").Replace("(TM)", "").Replace("CPU", "").Trim();
+        var at = name.IndexOf('@');
+        if (at > 0) name = name[..at].Trim();
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length > 2 ? string.Join(" ", parts[1..]) : name;
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}
