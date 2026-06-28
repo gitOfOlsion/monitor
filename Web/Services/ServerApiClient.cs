@@ -37,6 +37,9 @@ public class ServerApiClient
     public Task<List<AgentDto>?> GetAgentsAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<AgentDto>>("/api/agents"); }
 
+    public Task<List<AgentMetricsDto>?> GetMetricsAsync()
+    { AttachIdentity(); return _http.GetFromJsonAsync<List<AgentMetricsDto>>("/api/agents/metrics"); }
+
     public async Task<bool> ApproveAsync(Guid id)
     { AttachIdentity(); return (await _http.PostAsync($"/api/agents/{id}/approve", null)).IsSuccessStatusCode; }
 

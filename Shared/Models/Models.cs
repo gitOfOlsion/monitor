@@ -24,7 +24,11 @@ public record HeartbeatPayload(
     string?       CpuName      = null,
     int?          CpuCores     = null,
     long?         RamMb        = null,
-    string?       DiskInfo     = null
+    string?       DiskInfo     = null,
+    double?       CpuPercent   = null,   // live CPU utilisation 0-100
+    double?       RamPercent   = null,   // live RAM used 0-100
+    double?       DiskPercent  = null,   // live system-disk used 0-100
+    long?         RamUsedMb    = null    // live RAM used in MB (for display)
 );
 
 public record DeviceChangedPayload(
@@ -136,6 +140,29 @@ public class AgentDto
     public string?   DiskInfo      { get; set; }
     // Nested institution info (populated when Server includes it)
     public InstitutionDto? Institution { get; set; }
+}
+
+/// <summary>Live utilisation snapshot + short sparkline history for one agent.</summary>
+public class AgentMetricsDto
+{
+    public Guid     AgentId      { get; set; }
+    public string   MachineName  { get; set; } = "";
+    public string   Platform     { get; set; } = "Unknown";
+    public bool     Online       { get; set; }
+    public string?  CpuName      { get; set; }
+    public int?     CpuCores     { get; set; }
+    public long?    RamMb        { get; set; }
+    public string?  DiskInfo     { get; set; }
+    public string?  LoggedInUser { get; set; }
+    // Latest live values
+    public double?  CpuPercent   { get; set; }
+    public double?  RamPercent   { get; set; }
+    public double?  DiskPercent  { get; set; }
+    public long?    RamUsedMb    { get; set; }
+    public DateTime? LastHeartbeat { get; set; }
+    // Sparkline history (oldest → newest), ~last 60 samples
+    public List<double> CpuHistory { get; set; } = [];
+    public List<double> RamHistory { get; set; } = [];
 }
 
 public class DeviceEventDto

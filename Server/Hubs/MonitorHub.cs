@@ -11,10 +11,11 @@ public class MonitorHub : Hub
     private readonly AgentService _agents;
     private readonly AgentConnectionRegistry _connections;
     private readonly TunnelManager _tunnels;
+    private readonly MetricsService _metrics;
     private readonly ILogger<MonitorHub> _log;
 
-    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, TunnelManager tunnels, ILogger<MonitorHub> log)
-    { _agents = agents; _connections = connections; _tunnels = tunnels; _log = log; }
+    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, TunnelManager tunnels, MetricsService metrics, ILogger<MonitorHub> log)
+    { _agents = agents; _connections = connections; _tunnels = tunnels; _metrics = metrics; _log = log; }
 
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
@@ -23,7 +24,10 @@ public class MonitorHub : Hub
             p.MachineName, p.MacAddress, p.Platform, p.InstitutionId, p.Timestamp, p.DeviceCount,
             p.LoggedInUser, p.CpuName, p.CpuCores, p.RamMb, p.DiskInfo);
         if (agentId != Guid.Empty)
+        {
             _connections.Register(agentId, Context.ConnectionId);
+            _metrics.Record(agentId, p.CpuPercent, p.RamPercent, p.DiskPercent, p.RamUsedMb);
+        }
 
         await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnAgentHeartbeat", p);
         await Clients.Group("superadmin").SendAsync("OnAgentHeartbeat", p);

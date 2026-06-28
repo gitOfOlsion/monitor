@@ -240,9 +240,148 @@ public class AgentWorker : BackgroundService
         return _hwCache;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken ct)
+    // ── Live utilisation sampling ────────────────────────────────────────
+    private (double? cpu, double? ramPct, double? diskPct, long? ramUsedMb) GetLiveMetrics()
     {
-        _log.LogInformation("Agent starting — {Machine} | {Mac} | {Platform}", _machineName, _macAddress, _platform);
+        double? cpu = null, ramPct = null, diskPct = null;
+        long? ramUsedMb = null;
+        try
+        {
+            // CPU: aggregate process time delta across all cores. For a system-wide
+            // figure we use the OS performance data where available.
+            if (OperatingSystem.IsWindows())
+            {
+                var (c, rAvail, rTotal) = WindowsLiveMetrics();
+                cpu = c;
+                if (rTotal > 0)
+                {
+                    var used = rTotal - rAvail;
+                    ramUsedMb = used / (1024 * 1024);
+                    ramPct = 100.0 * used / rTotal;
+                }
+            }
+            else
+            {
+                var (c, rUsedMb, rTotalMb) = LinuxLiveMetrics();
+                cpu = c;
+                ramUsedMb = rUsedMb;
+                ramPct = rTotalMb > 0 ? 100.0 * rUsedMb / rTotalMb : null;
+            }
+
+            // Disk: system drive used %
+            var sysRoot = OperatingSystem.IsWindows()
+                ? Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System)) ?? "C:\\"
+                : "/";
+            var di = new DriveInfo(sysRoot);
+            if (di.IsReady && di.TotalSize > 0)
+                diskPct = 100.0 * (di.TotalSize - di.AvailableFreeSpace) / di.TotalSize;
+        }
+        catch { /* non-fatal */ }
+        return (cpu.HasValue ? Math.Round(cpu.Value, 1) : null,
+                ramPct.HasValue ? Math.Round(ramPct.Value, 1) : null,
+                diskPct.HasValue ? Math.Round(diskPct.Value, 1) : null,
+                ramUsedMb);
+    }
+
+    // Returns (cpuPercent, ramAvailableBytes, ramTotalBytes)
+    private (double? cpu, long ramAvail, long ramTotal) WindowsLiveMetrics()
+    {
+        double? cpu = null;
+        long ramAvail = 0, ramTotal = 0;
+        try
+        {
+            var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
+            scope.Connect();
+
+            // CPU load via Win32_Processor.LoadPercentage (instantaneous, no sampling needed)
+            using (var q = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery("SELECT LoadPercentage FROM Win32_Processor")))
+            {
+                double sum = 0; int n = 0;
+                foreach (System.Management.ManagementObject o in q.Get())
+                {
+                    if (o["LoadPercentage"] != null) { sum += Convert.ToDouble(o["LoadPercentage"]); n++; }
+                }
+                if (n > 0) cpu = sum / n;
+            }
+
+            // RAM via Win32_OperatingSystem (values in KB)
+            using (var q = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery("SELECT FreePhysicalMemory, TotalVisibleMemorySize FROM Win32_OperatingSystem")))
+            {
+                foreach (System.Management.ManagementObject o in q.Get())
+                {
+                    ramAvail = Convert.ToInt64(o["FreePhysicalMemory"]) * 1024;       // KB → bytes
+                    ramTotal = Convert.ToInt64(o["TotalVisibleMemorySize"]) * 1024;
+                    break;
+                }
+            }
+        }
+        catch { /* non-fatal */ }
+        return (cpu, ramAvail, ramTotal);
+    }
+
+    // Returns (cpuPercent, ramUsedMb, ramTotalMb)
+    private (double? cpu, long ramUsedMb, long ramTotalMb) LinuxLiveMetrics()
+    {
+        double? cpu = null;
+        long ramUsedMb = 0, ramTotalMb = 0;
+        try
+        {
+            // RAM from /proc/meminfo
+            if (File.Exists("/proc/meminfo"))
+            {
+                long total = 0, avail = 0;
+                foreach (var line in File.ReadLines("/proc/meminfo"))
+                {
+                    if (line.StartsWith("MemTotal:")) total = ParseMeminfoKb(line);
+                    else if (line.StartsWith("MemAvailable:")) avail = ParseMeminfoKb(line);
+                    if (total > 0 && avail > 0) break;
+                }
+                ramTotalMb = total / 1024;
+                ramUsedMb  = (total - avail) / 1024;
+            }
+
+            // CPU from two /proc/stat samples 200ms apart
+            cpu = SampleLinuxCpu();
+        }
+        catch { /* non-fatal */ }
+        return (cpu, ramUsedMb, ramTotalMb);
+    }
+
+    private static long ParseMeminfoKb(string line)
+    {
+        var digits = new string(line.Where(char.IsDigit).ToArray());
+        return long.TryParse(digits, out var v) ? v : 0;
+    }
+
+    private static double? SampleLinuxCpu()
+    {
+        try
+        {
+            var (idle1, total1) = ReadProcStat();
+            System.Threading.Thread.Sleep(200);
+            var (idle2, total2) = ReadProcStat();
+            var idleDelta = idle2 - idle1;
+            var totalDelta = total2 - total1;
+            if (totalDelta <= 0) return null;
+            return Math.Round(100.0 * (1.0 - (double)idleDelta / totalDelta), 1);
+        }
+        catch { return null; }
+    }
+
+    private static (long idle, long total) ReadProcStat()
+    {
+        var line = File.ReadLines("/proc/stat").FirstOrDefault(l => l.StartsWith("cpu "));
+        if (line == null) return (0, 0);
+        var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        long total = 0; long idle = 0;
+        for (int i = 1; i < parts.Length; i++)
+        {
+            if (long.TryParse(parts[i], out var v)) { total += v; if (i == 4) idle = v; }
+        }
+        return (idle, total);
+    }
 
         var token = await ResolveTokenAsync(ct);
         if (token == null)
@@ -281,12 +420,13 @@ public class AgentWorker : BackgroundService
                     var snap = await _monitor.GetSnapshotAsync();
                     var loggedInUser = GetLoggedInUser();
                     var (cpu, cores, ramMb, disk) = GetHardwareInfo();
-                    _log.LogInformation("Heartbeat — {N} devices, User={User}, Diag={Diag}",
-                        snap.Count, loggedInUser ?? "none", _userDiag);
+                    var (cpuPct, ramPct, diskPct, ramUsedMb) = GetLiveMetrics();
+                    _log.LogInformation("Heartbeat — {N} devices, User={User}, CPU%={Cpu} RAM%={Ram}",
+                        snap.Count, loggedInUser ?? "none", cpuPct?.ToString() ?? "?", ramPct?.ToString() ?? "?");
                     await _hub.SendAsync("AgentHeartbeat",
                         new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(),
-                            DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk), ct);
-                    _log.LogDebug("Heartbeat — {N} devices, User={User}", snap.Count, loggedInUser ?? "none");
+                            DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk,
+                            cpuPct, ramPct, diskPct, ramUsedMb), ct);
                     await FlushPendingEventsAsync();
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)
