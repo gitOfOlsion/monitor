@@ -86,6 +86,7 @@ public class DeviceCategoryEntity
 public class DeviceEventEntity
 {
     public long      Id           { get; set; }
+    public Guid      EventId      { get; set; }  // client-generated; unique index prevents duplicate inserts on resync
     public Guid      AgentId      { get; set; }
     public int?      CategoryId   { get; set; }
     public string    MachineName  { get; set; } = "";
@@ -199,6 +200,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
             e.ToTable("device_events");
             e.HasKey(de => de.Id);
             e.HasIndex(de => new { de.AgentId, de.Timestamp });
+            e.HasIndex(de => de.EventId).IsUnique();
             e.HasOne(de => de.Agent).WithMany(a => a.DeviceEvents)
              .HasForeignKey(de => de.AgentId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(de => de.DeviceCategory).WithMany(c => c.DeviceEvents)

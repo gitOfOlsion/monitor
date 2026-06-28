@@ -13,43 +13,40 @@
 <div class="pm-page-header">
     <h1>Device Events</h1>
     <div class="pm-filters">
-        <input class="pm-input pm-input-sm" @bind="_fMachine" @bind:event="oninput"
-               placeholder="Filter by machine…" />
-        @if (!string.IsNullOrEmpty(_fMachine))
-        {
-            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="ClearFilter">✕ Clear</button>
-        }
         <select class="pm-input pm-input-sm" @bind="_groupBy">
             <option value="kind">Group by kind</option>
             <option value="date">Group by date</option>
             <option value="none">Flat list</option>
         </select>
+        <a class="pm-btn pm-btn-secondary pm-btn-sm" href="/analytics">📊 Analytics</a>
     </div>
 </div>
 
 <p class="pm-hint" style="margin:0 0 1rem 0">
     Every event the agents report — peripherals, network, user sessions and more.
-    Click a group header to expand or collapse it. Click a machine name in the Agents page to pre-filter here.
+    Each group has its own per-column filters. Click a group header to expand or collapse it.
 </p>
 
 @if (_loading)
 {
     <div class="pm-loading">Loading events…</div>
 }
-else if (Grouped.Count == 0)
+else if (_events.Count == 0)
 {
-    <div class="pm-empty">No events@(string.IsNullOrEmpty(_fMachine) ? "" : $" for \"{_fMachine}\"").</div>
+    <div class="pm-empty">No events yet.</div>
 }
 else
 {
     foreach (var group in Grouped)
     {
         var isOpen = _open.Contains(group.Key);
+        var f = GetFilter(group.Key);
+        var rows = ApplyFilters(group.Events, f).ToList();
         <div class="pm-accordion">
             <button class="pm-accordion-header" @onclick="() => Toggle(group.Key)">
                 <span>@group.Icon @group.Label</span>
                 <span class="pm-accordion-meta">
-                    <span class="pm-event-group-count">@group.Events.Count event@(group.Events.Count == 1 ? "" : "s")</span>
+                    <span class="pm-event-group-count">@rows.Count / @group.Events.Count event@(group.Events.Count == 1 ? "" : "s")</span>
                     <span class="pm-accordion-chevron">@(isOpen ? "▲" : "▼")</span>
                 </span>
             </button>
@@ -57,56 +54,154 @@ else
             {
                 <div class="pm-accordion-body">
                     <div class="pm-table-wrapper">
-                        <table class="pm-table">
+                        <table class="pm-table pm-events-table">
                             <thead>
                                 <tr>
-                                    <th style="width:180px">Time</th>
-                                    <th style="width:140px">Machine</th>
-                                    <th style="width:110px">Event</th>
+                                    <th style="width:170px">Time</th>
+                                    <th style="width:150px">Machine</th>
+                                    <th style="width:120px">Event</th>
                                     <th>Detail</th>
-                                    <th style="width:110px">Category</th>
-                                    <th style="width:80px">Status</th>
+                                    <th style="width:120px">Category</th>
+                                    <th style="width:90px">Status</th>
+                                </tr>
+                                <tr class="pm-filter-row">
+                                    <th>
+                                        <div class="pm-filter-stack">
+                                            <input type="date" class="pm-input pm-input-xs" value="@f.DateFrom"
+                                                   @onchange="@(e => f.DateFrom = e.Value?.ToString() ?? string.Empty)" title="From date" />
+                                            <input type="date" class="pm-input pm-input-xs" value="@f.DateTo"
+                                                   @onchange="@(e => f.DateTo = e.Value?.ToString() ?? string.Empty)" title="To date" />
+                                        </div>
+                                    </th>
+                                    <th>
+                                        <input class="pm-input pm-input-xs" placeholder="filter…"
+                                               value="@f.Machine" @oninput="@(e => f.Machine = e.Value?.ToString() ?? string.Empty)" />
+                                    </th>
+                                    <th>
+                                        <select class="pm-input pm-input-xs" value="@f.Event"
+                                                @onchange="@(e => f.Event = e.Value?.ToString() ?? string.Empty)">
+                                            <option value="">all</option>
+                                            @foreach (var ev in DistinctValues(group.Events, x => x.EventType))
+                                            { <option value="@ev">@ev</option> }
+                                        </select>
+                                    </th>
+                                    <th>
+                                        <input class="pm-input pm-input-xs" placeholder="filter…"
+                                               value="@f.Detail" @oninput="@(e => f.Detail = e.Value?.ToString() ?? string.Empty)" />
+                                    </th>
+                                    <th>
+                                        <select class="pm-input pm-input-xs" value="@f.Category"
+                                                @onchange="@(e => f.Category = e.Value?.ToString() ?? string.Empty)">
+                                            <option value="">all</option>
+                                            @foreach (var c in DistinctValues(group.Events, x => x.Category))
+                                            { <option value="@c">@c</option> }
+                                        </select>
+                                    </th>
+                                    <th>
+                                        <select class="pm-input pm-input-xs" value="@f.Status"
+                                                @onchange="@(e => f.Status = e.Value?.ToString() ?? string.Empty)">
+                                            <option value="">all</option>
+                                            @foreach (var s in DistinctValues(group.Events, x => x.Status))
+                                            { <option value="@s">@s</option> }
+                                        </select>
+                                    </th>
                                 </tr>
                             </thead>
                             <tbody>
-                                @foreach (var e in group.Events)
+                                @if (rows.Count == 0)
                                 {
-                                    <tr>
-                                        <td class="pm-mono">@Fmt(e.Timestamp)</td>
-                                        <td>
-                                            <a href="/events?machine=@Uri.EscapeDataString(e.MachineName)"
-                                               style="color:var(--text);text-decoration:none"
-                                               title="Filter to @e.MachineName">
-                                                @e.MachineName
-                                            </a>
-                                        </td>
-                                        <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
-                                        <td>@e.FriendlyName</td>
-                                        <td>@e.Category</td>
-                                        <td>@e.Status</td>
-                                    </tr>
+                                    <tr><td colspan="6" class="pm-empty" style="padding:1rem">No events match the filters in this group.</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var e in rows)
+                                    {
+                                        <tr>
+                                            <td class="pm-mono">@Fmt(e.Timestamp)</td>
+                                            <td>@e.MachineName</td>
+                                            <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
+                                            <td>@e.FriendlyName</td>
+                                            <td>@e.Category</td>
+                                            <td>@e.Status</td>
+                                        </tr>
+                                    }
                                 }
                             </tbody>
                         </table>
                     </div>
+                    @if (HasActiveFilter(f))
+                    {
+                        <div style="padding:.5rem .75rem">
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => ClearGroupFilter(group.Key)">✕ Clear this group's filters</button>
+                        </div>
+                    }
                 </div>
             }
         </div>
     }
-    <div class="pm-table-footer">Showing @FilteredCount of @_events.Count events</div>
+    <div class="pm-table-footer">@_events.Count events total</div>
 }
 
 @code {
     [Parameter, SupplyParameterFromQuery] public string? Machine { get; set; }
 
     private List<DeviceChangedPayload> _events = [];
-    private string _fMachine = "";
     private string _groupBy = "kind";
     private bool _loading = true;
     private TimeSpan _tzOffset = TimeSpan.Zero;
     private bool _tzFetched;
-    // Track which accordion groups are open (open by default)
     private HashSet<string> _open = new(StringComparer.OrdinalIgnoreCase);
+
+    // Per-group, per-column filter state. Keyed by group key.
+    private class ColumnFilter
+    {
+        public string DateFrom = "", DateTo = "";
+        public string Machine = "", Event = "", Detail = "", Category = "", Status = "";
+    }
+    private readonly Dictionary<string, ColumnFilter> _filters = new();
+
+    private ColumnFilter GetFilter(string groupKey)
+    {
+        if (!_filters.TryGetValue(groupKey, out var f))
+        {
+            f = new ColumnFilter();
+            _filters[groupKey] = f;
+        }
+        return f;
+    }
+
+    private static bool HasActiveFilter(ColumnFilter f) =>
+        !string.IsNullOrEmpty(f.DateFrom) || !string.IsNullOrEmpty(f.DateTo) ||
+        !string.IsNullOrEmpty(f.Machine) || !string.IsNullOrEmpty(f.Event) ||
+        !string.IsNullOrEmpty(f.Detail) || !string.IsNullOrEmpty(f.Category) ||
+        !string.IsNullOrEmpty(f.Status);
+
+    private void ClearGroupFilter(string groupKey) => _filters[groupKey] = new ColumnFilter();
+
+    private IEnumerable<DeviceChangedPayload> ApplyFilters(List<DeviceChangedPayload> events, ColumnFilter f)
+    {
+        IEnumerable<DeviceChangedPayload> q = events;
+
+        if (DateTime.TryParse(f.DateFrom, out var from))
+            q = q.Where(e => e.Timestamp.Add(_tzOffset).Date >= from.Date);
+        if (DateTime.TryParse(f.DateTo, out var to))
+            q = q.Where(e => e.Timestamp.Add(_tzOffset).Date <= to.Date);
+        if (!string.IsNullOrWhiteSpace(f.Machine))
+            q = q.Where(e => e.MachineName.Contains(f.Machine, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(f.Event))
+            q = q.Where(e => e.EventType == f.Event);
+        if (!string.IsNullOrWhiteSpace(f.Detail))
+            q = q.Where(e => e.FriendlyName.Contains(f.Detail, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(f.Category))
+            q = q.Where(e => e.Category == f.Category);
+        if (!string.IsNullOrWhiteSpace(f.Status))
+            q = q.Where(e => e.Status == f.Status);
+
+        return q;
+    }
+
+    private static IEnumerable<string> DistinctValues(List<DeviceChangedPayload> events, Func<DeviceChangedPayload, string> sel)
+        => events.Select(sel).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s);
 
     private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
         => utc.Add(_tzOffset).ToString(format);
@@ -114,12 +209,6 @@ else
     private void Toggle(string key)
     {
         if (!_open.Remove(key)) _open.Add(key);
-    }
-
-    private void ClearFilter()
-    {
-        _fMachine = "";
-        Nav.NavigateTo("/events", replace: true);
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -140,36 +229,27 @@ else
         ["remote-desktop"] = ("🖥️", "Remote Desktop", new[] { "RemoteDesktop" }),
     };
 
-    private IEnumerable<DeviceChangedPayload> FilteredEvents => _events.Where(e =>
-        string.IsNullOrEmpty(_fMachine) ||
-        e.MachineName.Contains(_fMachine, StringComparison.OrdinalIgnoreCase));
-
-    private int FilteredCount => FilteredEvents.Count();
-
     private record EventGroup(string Key, string Icon, string Label, List<DeviceChangedPayload> Events);
 
     private List<EventGroup> Grouped
     {
         get
         {
-            var filtered = FilteredEvents.ToList();
             if (_groupBy == "none")
-                return [new EventGroup("all", "📋", "All events", filtered)];
+                return [new EventGroup("all", "📋", "All events", _events.OrderByDescending(e => e.Timestamp).ToList())];
 
             if (_groupBy == "date")
-                return filtered
+                return _events
                     .GroupBy(e => e.Timestamp.Add(_tzOffset).Date)
                     .OrderByDescending(g => g.Key)
                     .Select(g => new EventGroup(
-                        g.Key.ToString("yyyyMMdd"),
-                        "📅",
+                        g.Key.ToString("yyyyMMdd"), "📅",
                         g.Key.ToString("yyyy-MM-dd (dddd)"),
                         g.OrderByDescending(e => e.Timestamp).ToList()))
                     .ToList();
 
-            // Group by kind — nothing hidden, Other catches anything unmapped
             var result = new List<EventGroup>();
-            var remaining = filtered.ToList();
+            var remaining = _events.ToList();
             foreach (var (key, kind) in Kinds)
             {
                 var matched = remaining.Where(e => kind.Categories.Contains(e.Category))
@@ -188,16 +268,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // Pre-fill filter from query param (set when clicking machine name in Agents page)
-        if (!string.IsNullOrEmpty(Machine)) _fMachine = Machine;
-
         var db = await Api.GetEventsAsync(500) ?? [];
         _events = db.Select(e => new DeviceChangedPayload(
             e.MachineName, Guid.Empty, e.EventType, e.DeviceId,
             e.FriendlyName, e.Category, e.Status, e.Timestamp)).ToList();
         _loading = false;
 
-        // Open all groups by default
+        // If arrived with a ?machine= param, pre-seed every group's machine filter
+        if (!string.IsNullOrEmpty(Machine))
+            foreach (var g in Grouped) GetFilter(g.Key).Machine = Machine;
+
         foreach (var g in Grouped) _open.Add(g.Key);
 
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -211,7 +291,6 @@ else
     {
         _events.Insert(0, p);
         if (_events.Count > 500) _events.RemoveAt(500);
-        // Auto-open new group if it wasn't open
         foreach (var g in Grouped.Where(g => g.Events.Contains(p)))
             _open.Add(g.Key);
         InvokeAsync(StateHasChanged);
