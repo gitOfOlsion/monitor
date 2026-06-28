@@ -190,14 +190,30 @@ public class AgentService
             return;
         }
 
+        // Dedup: if this exact event was already recorded (e.g. agent resent it after
+        // a reconnect or reinstall replayed its outbox), skip it silently.
+        if (p.EventId != Guid.Empty &&
+            await db.DeviceEvents.AnyAsync(e => e.EventId == p.EventId))
+        {
+            return;
+        }
+
         var cat = await db.DeviceCategories.FirstOrDefaultAsync(c => c.Name == p.Category);
         db.DeviceEvents.Add(new DeviceEventEntity
         {
+            EventId = p.EventId == Guid.Empty ? Guid.NewGuid() : p.EventId,
             AgentId = agent.Id, CategoryId = cat?.Id, MachineName = p.MachineName,
             EventType = p.EventType, DeviceId = p.DeviceId, FriendlyName = p.FriendlyName,
             Category = p.Category, Status = p.Status, Timestamp = p.Timestamp
         });
-        await db.SaveChangesAsync();
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Unique-index violation from a concurrent duplicate insert — safe to ignore.
+        }
     }
 
     public async Task<List<DeviceEventEntity>> GetEventsAsync(int count = 200, Guid? institutionId = null, Guid? agentId = null)

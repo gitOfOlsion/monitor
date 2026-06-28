@@ -170,6 +170,29 @@ if (-not (Test-Path $InstallPath)) {
 New-Item -ItemType Directory -Path "$InstallPath\logs" -Force | Out-Null
 New-Item -ItemType Directory -Path "$InstallPath\data" -Force | Out-Null
 
+# Persistent data directory in ProgramData. This holds the durable event outbox
+# and the permanent event history (outbox.jsonl / history.jsonl). It lives OUTSIDE
+# the install path on purpose, so reinstalling the agent (which only touches
+# $InstallPath) never deletes the historic event log. We create it if missing but
+# never clear it.
+$dataDir = Join-Path $env:ProgramData 'PeripheralMonitor'
+if (-not (Test-Path $dataDir)) {
+    New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+    Write-Ok "Created persistent data dir $dataDir (survives reinstall)"
+} else {
+    $hist = Join-Path $dataDir 'history.jsonl'
+    $histInfo = if (Test-Path $hist) { " (existing history preserved: $((Get-Item $hist).Length) bytes)" } else { "" }
+    Write-Ok "Persistent data dir $dataDir already exists$histInfo"
+}
+# Grant SYSTEM (the service account) full control of the data dir so it can write.
+try {
+    $dacl = Get-Acl $dataDir
+    $sysRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        'NT AUTHORITY\SYSTEM', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+    $dacl.AddAccessRule($sysRule)
+    Set-Acl -Path $dataDir -AclObject $dacl
+} catch { Write-Warn "Could not set ACL on data dir: $_" }
+
 # ----------------------------------------------------------------------
 # CRITICAL: Stop the service BEFORE copying files. A running service holds
 # PeripheralMonitor.Agent.exe open, which makes Copy-Item silently skip the
@@ -223,15 +246,20 @@ Write-Step "Setting folder permissions..."
 
 $acl  = Get-Acl $InstallPath
 $acl.SetAccessRuleProtection($true, $true)
-$rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    $ServiceUser, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-$acl.AddAccessRule($rule)
+# Service runs as LocalSystem, so grant SYSTEM full control (for logs/data writes).
+# Also grant Administrators so the install/uninstall can manage the folder.
+$ruleSystem = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    'NT AUTHORITY\SYSTEM', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$ruleAdmin = New-Object System.Security.AccessControl.FileSystemAccessRule(
+    'BUILTIN\Administrators', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$acl.AddAccessRule($ruleSystem)
+$acl.AddAccessRule($ruleAdmin)
 Set-Acl -Path $InstallPath -AclObject $acl
 
 Get-ChildItem $InstallPath -Recurse -Directory | ForEach-Object {
     Set-Acl -Path $_.FullName -AclObject $acl
 }
-Write-Ok "Permissions set - $ServiceUser has full control of $InstallPath"
+Write-Ok "Permissions set - SYSTEM has full control of $InstallPath"
 
 # ======================================================================
 # STEP 5: Register Windows Service
@@ -254,17 +282,22 @@ if ($existing) {
     Start-Sleep -Seconds 2
 }
 
-$credential = New-Object System.Management.Automation.PSCredential(
-    ".\$ServiceUser", $script:svcPassword)
-
+# Run as LocalSystem. The dedicated low-privilege account cannot query other
+# users' session info via the WTS API (WTSQuerySessionInformation returns
+# access-denied), so the logged-in user can never be detected. LocalSystem has
+# the SeTcbPrivilege and session-query rights needed. A monitoring agent that
+# already needs broad WMI and RDP-tunnel access is appropriately run as SYSTEM.
 New-Service -Name $ServiceName `
             -BinaryPathName $exePath `
             -DisplayName 'Peripheral Monitor Agent' `
             -Description 'Monitors peripheral devices and reports to the central dashboard' `
-            -StartupType Automatic `
-            -Credential $credential | Out-Null
+            -StartupType Automatic | Out-Null
 
-Write-Ok "Service '$ServiceName' registered"
+# New-Service defaults to LocalSystem when no -Credential is supplied.
+# Explicitly set it to be certain (handles the case of an pre-existing service def).
+& sc.exe config $ServiceName obj= "LocalSystem" | Out-Null
+
+Write-Ok "Service '$ServiceName' registered (running as LocalSystem)"
 
 # Configure recovery: restart on failure
 & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null

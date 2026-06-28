@@ -35,7 +35,8 @@ public record DeviceChangedPayload(
     string   FriendlyName,
     string   Category,
     string   Status,
-    DateTime Timestamp
+    DateTime Timestamp,
+    Guid     EventId = default   // client-generated stable id; enables server-side dedup on resync
 );
 
 public record DeviceInfo(

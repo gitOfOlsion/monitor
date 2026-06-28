@@ -22,14 +22,12 @@ public class AgentWorker : BackgroundService
     private readonly AgentPlatform _platform    = OperatingSystem.IsWindows() ? AgentPlatform.Windows : AgentPlatform.Linux;
     private Guid _institutionId = Guid.Empty;
 
-    // Events detected while the SignalR connection is down (e.g. during the brief
-    // reconnect window after a network blip - exactly when a "tunnel disconnected"
-    // event is most likely to fire) are buffered here instead of silently dropped,
-    // then flushed as soon as the connection is back up.
-    private readonly System.Collections.Concurrent.ConcurrentQueue<DeviceChangedPayload> _pendingEvents = new();
+    // Durable, restart- and reinstall-safe event storage (JSONL outbox + history
+    // in %ProgramData%). Replaces the old in-memory queue that lost events on restart.
+    private readonly EventStore _store;
 
     public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, TunnelClient tunnel, ILogger<AgentWorker> l)
-    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; }
+    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; _store = new EventStore(l); }
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     // ── Win32 Terminal Services API (works from Session 0 services) ─────────
@@ -304,44 +302,63 @@ public class AgentWorker : BackgroundService
         var payload = new DeviceChangedPayload(_machineName, _institutionId, eventType,
             dev.DeviceId, dev.FriendlyName, dev.Category, dev.Status, DateTime.UtcNow);
 
-        if (_hub?.State != HubConnectionState.Connected)
-        {
-            // Buffer instead of dropping - this is exactly when a flaky network
-            // adapter event is likely to coincide with our own connection blipping.
-            _pendingEvents.Enqueue(payload);
-            _log.LogWarning("[{Event}] {Cat} — {Name} (hub disconnected, buffered for later send)", eventType, dev.Category, dev.FriendlyName);
-            return;
-        }
+        // ALWAYS persist first (history + outbox). This guarantees the event survives
+        // a crash/restart/reinstall even if it's never successfully sent.
+        payload = _store.Record(payload);
 
-        try
-        {
-            await _hub.SendAsync("DeviceChanged", payload);
-            _log.LogInformation("[{Event}] {Cat} — {Name}", eventType, dev.Category, dev.FriendlyName);
-        }
-        catch (Exception ex)
-        {
-            _pendingEvents.Enqueue(payload);
-            _log.LogWarning(ex, "DeviceChanged send error - buffered for retry");
-        }
-    }
-
-    /// <summary>Flushes any device-change events that were buffered while disconnected.</summary>
-    private async Task FlushPendingEventsAsync()
-    {
-        if (_hub?.State != HubConnectionState.Connected) return;
-        while (_pendingEvents.TryDequeue(out var payload))
+        // Then try to deliver immediately if connected.
+        if (_hub?.State == HubConnectionState.Connected)
         {
             try
             {
                 await _hub.SendAsync("DeviceChanged", payload);
-                _log.LogInformation("[Flushed] {Event} {Cat} — {Name}", payload.EventType, payload.Category, payload.FriendlyName);
+                _store.MarkDelivered(new[] { payload.EventId });
+                _log.LogInformation("[{Event}] {Cat} — {Name}", eventType, dev.Category, dev.FriendlyName);
+                return;
             }
             catch (Exception ex)
             {
-                _log.LogWarning(ex, "Failed to flush buffered event - re-queueing");
-                _pendingEvents.Enqueue(payload);
-                break; // stop trying, connection likely dropped again
+                _log.LogWarning(ex, "DeviceChanged send failed - left in durable outbox for retry");
             }
+        }
+        else
+        {
+            _log.LogWarning("[{Event}] {Cat} — {Name} (offline, persisted to outbox)", eventType, dev.Category, dev.FriendlyName);
+        }
+    }
+
+    /// <summary>
+    /// Drains the durable outbox: sends every pending event, marking each delivered
+    /// (which trims it from the outbox file). Runs on each heartbeat once connected.
+    /// Events the server has already seen are deduped server-side via EventId, so
+    /// replaying after a reinstall or crash never creates duplicates.
+    /// </summary>
+    private async Task FlushPendingEventsAsync()
+    {
+        if (_hub?.State != HubConnectionState.Connected) return;
+
+        var pending = _store.GetPending();
+        if (pending.Count == 0) return;
+
+        var delivered = new List<Guid>();
+        foreach (var payload in pending)
+        {
+            try
+            {
+                await _hub.SendAsync("DeviceChanged", payload);
+                delivered.Add(payload.EventId);
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Flush interrupted - will resume on next heartbeat");
+                break; // connection likely dropped; keep the rest in the outbox
+            }
+        }
+
+        if (delivered.Count > 0)
+        {
+            _store.MarkDelivered(delivered);
+            _log.LogInformation("Flushed {N} buffered event(s) from durable outbox", delivered.Count);
         }
     }
 

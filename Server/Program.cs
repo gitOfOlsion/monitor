@@ -103,10 +103,13 @@ try
         await conn.OpenAsync();
         using var cmd = conn.CreateCommand();
         cmd.CommandText = @"
+            CREATE EXTENSION IF NOT EXISTS pgcrypto;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""CpuName""  TEXT;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""CpuCores"" INTEGER;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""RamMb""    BIGINT;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""DiskInfo"" TEXT;
+            ALTER TABLE ""device_events"" ADD COLUMN IF NOT EXISTS ""EventId"" UUID NOT NULL DEFAULT gen_random_uuid();
+            CREATE UNIQUE INDEX IF NOT EXISTS ""IX_device_events_EventId"" ON ""device_events"" (""EventId"");
         ";
         await cmd.ExecuteNonQueryAsync();
 
