@@ -74,6 +74,15 @@ public class ServerApiClient
     public Task<List<InstitutionDto>?> GetInstitutionsAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<InstitutionDto>>("/api/institutions"); }
 
+    // ── Reporting ────────────────────────────────────────────────────────────
+    public async Task<ReportResultDto?> GenerateReportAsync(ReportRequest req)
+    {
+        AttachIdentity();
+        var r = await _http.PostAsJsonAsync("/api/events/report", req);
+        if (!r.IsSuccessStatusCode) return null;
+        return await r.Content.ReadFromJsonAsync<ReportResultDto>();
+    }
+
     // ── Feature management ───────────────────────────────────────────────────
     public Task<List<FeatureStateDto>?> GetFeaturesAsync(Guid? institutionId = null, Guid? agentId = null)
     {

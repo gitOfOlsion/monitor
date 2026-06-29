@@ -407,3 +407,28 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 .pm-feature-inherit { font-size: .75rem; color: var(--text-muted); margin-top: 5px; display: flex; gap: .5rem; }
 .pm-feature-override { color: #b45309; }
 .pm-feature-controls { flex-shrink: 0; }
+
+/* ── Reports ─────────────────────────────────────────────────────────── */
+.pm-report-filters { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; margin-bottom: 1.25rem; padding: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.pm-report-actions { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+.pm-report-count { font-size: .9rem; color: var(--text-muted); }
+.pm-report-trunc { color: #b45309; margin-left: .4rem; }
+.pm-report-document { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; }
+.pm-report-header { border-bottom: 2px solid var(--border); padding-bottom: 1rem; margin-bottom: 1rem; }
+.pm-report-header h2 { margin: 0 0 .5rem 0; font-size: 1.3rem; }
+.pm-report-meta { font-size: .82rem; color: var(--text-muted); display: flex; flex-direction: column; gap: 2px; }
+.pm-report-table { width: 100%; font-size: .82rem; }
+.pm-report-footer { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--border); font-size: .72rem; color: var(--text-muted); text-align: center; }
+
+/* Print: show only the report document, nothing else on the page */
+@media print {
+    .pm-no-print, .pm-sidebar { display: none !important; }
+    .pm-layout { display: block !important; }
+    .pm-main { margin: 0 !important; padding: 0 !important; background: #fff !important; width: 100% !important; }
+    body { background: #fff !important; }
+    .pm-report-document { border: none !important; border-radius: 0 !important; padding: 0 !important; box-shadow: none !important; }
+    .pm-report-table { font-size: 10pt; width: 100%; }
+    .pm-report-table th { background: #f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .pm-report-table tr { page-break-inside: avoid; }
+    @page { margin: 1.5cm; }
+}

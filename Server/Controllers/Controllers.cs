@@ -366,6 +366,34 @@ public class EventsController : ScopedController
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int count = 200, [FromQuery] Guid? agentId = null)
         => Ok(await _svc.GetEventsAsync(count, Caller().Scope, agentId));
+
+    /// <summary>Generate a filtered event report (for the Reports page / print-to-PDF).</summary>
+    [HttpPost("report")]
+    public async Task<IActionResult> Report([FromBody] ReportRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        // Scope guard: non-superadmins are pinned to their own institution regardless of request.
+        Guid? institutionId = c.IsSuperAdmin ? req.InstitutionId : c.InstitutionId;
+
+        var rows = await _svc.GetEventsReportAsync(
+            institutionId, req.AgentIds, req.FromUtc, req.ToUtc,
+            req.Category, req.EventType, req.Status, req.MachineContains, req.UserContains);
+
+        var result = new ReportResultDto
+        {
+            Rows = rows.Select(e => new ReportRowDto
+            {
+                Timestamp = e.Timestamp, MachineName = e.MachineName,
+                LoggedInUser = e.Agent?.LoggedInUser, EventType = e.EventType,
+                FriendlyName = e.FriendlyName, Category = e.Category, Status = e.Status
+            }).ToList(),
+            TotalRows = rows.Count,
+            Truncated = rows.Count >= 5000
+        };
+        return Ok(result);
+    }
 }
 
 // ── Institutions ────────────────────────────────────────────────────────────

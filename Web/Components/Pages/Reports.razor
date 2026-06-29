@@ -1,0 +1,208 @@
+@page "/reports"
+@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
+@using System.Security.Claims
+@inject ServerApiClient Api
+@inject AuthenticationStateProvider AuthState
+@inject TimeZoneService TZ
+@inject IJSRuntime JS
+
+<PageTitle>Reports</PageTitle>
+
+<div class="pm-page-header pm-no-print">
+    <h1>Event Reports</h1>
+</div>
+
+<div class="pm-report-filters pm-no-print">
+    @if (_isSuperAdmin)
+    {
+        <div class="pm-field">
+            <label>Institution</label>
+            <select class="pm-input pm-input-sm" @bind="_institution" @bind:after="OnInstitutionChanged">
+                <option value="">All institutions</option>
+                @foreach (var i in _institutions)
+                { <option value="@i.Id">@i.Name</option> }
+            </select>
+        </div>
+    }
+
+    <div class="pm-field">
+        <label>Device</label>
+        <select class="pm-input pm-input-sm" @bind="_agent">
+            <option value="">All devices</option>
+            @foreach (var a in _agents)
+            { <option value="@a.Id">@a.MachineName</option> }
+        </select>
+    </div>
+
+    <div class="pm-field">
+        <label>From</label>
+        <input type="date" class="pm-input pm-input-sm" @bind="_fromDate" />
+    </div>
+    <div class="pm-field">
+        <label>To</label>
+        <input type="date" class="pm-input pm-input-sm" @bind="_toDate" />
+    </div>
+
+    <div class="pm-field">
+        <label>Category</label>
+        <select class="pm-input pm-input-sm" @bind="_category">
+            <option value="">All</option>
+            @foreach (var c in _categories)
+            { <option value="@c">@c</option> }
+        </select>
+    </div>
+
+    <div class="pm-field">
+        <label>Event</label>
+        <select class="pm-input pm-input-sm" @bind="_eventType">
+            <option value="">All</option>
+            <option value="Connected">Connected</option>
+            <option value="Disconnected">Disconnected</option>
+        </select>
+    </div>
+
+    <div class="pm-field">
+        <label>User</label>
+        <input class="pm-input pm-input-sm" @bind="_user" placeholder="logged-in user…" />
+    </div>
+
+    <div class="pm-field" style="align-self:flex-end">
+        <button class="pm-btn pm-btn-primary" @onclick="GenerateAsync" disabled="@_loading">
+            @(_loading ? "Generating…" : "Generate report")
+        </button>
+    </div>
+</div>
+
+@if (_result != null)
+{
+    <div class="pm-report-actions pm-no-print">
+        <span class="pm-report-count">
+            @_result.TotalRows event@(_result.TotalRows == 1 ? "" : "s")
+            @if (_result.Truncated) { <span class="pm-report-trunc">(capped at 5000 — narrow your filters)</span> }
+        </span>
+        <button class="pm-btn pm-btn-secondary" @onclick="PrintAsync">🖨 Print / Save as PDF</button>
+    </div>
+
+    <div class="pm-report-document" id="report-doc">
+        <div class="pm-report-header">
+            <h2>Peripheral Monitor — Event Report</h2>
+            <div class="pm-report-meta">
+                <div>Generated: @Fmt(_result.GeneratedAtUtc)</div>
+                @if (!string.IsNullOrEmpty(_summaryLine)) { <div>@_summaryLine</div> }
+                <div>@_result.TotalRows record@(_result.TotalRows == 1 ? "" : "s")</div>
+            </div>
+        </div>
+
+        @if (_result.Rows.Count == 0)
+        {
+            <div class="pm-empty">No events match these filters.</div>
+        }
+        else
+        {
+            <table class="pm-table pm-report-table">
+                <thead>
+                    <tr>
+                        <th>Time</th><th>Machine</th><th>User</th>
+                        <th>Event</th><th>Detail</th><th>Category</th><th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _result.Rows)
+                    {
+                        <tr>
+                            <td class="pm-mono">@Fmt(r.Timestamp)</td>
+                            <td>@r.MachineName</td>
+                            <td>@(r.LoggedInUser ?? "—")</td>
+                            <td>@r.EventType</td>
+                            <td>@r.FriendlyName</td>
+                            <td>@r.Category</td>
+                            <td>@r.Status</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+        <div class="pm-report-footer">Peripheral Monitor · confidential · generated @Fmt(_result.GeneratedAtUtc)</div>
+    </div>
+}
+
+@code {
+    private bool _isSuperAdmin;
+    private List<InstitutionDto> _institutions = [];
+    private List<AgentDto>       _agents       = [];
+    private static readonly string[] _categories =
+        { "USB Device","Keyboard","Mouse","HID Device","Storage","Optical Drive","Display","Audio","Bluetooth","Camera","Printer","Serial/COM Port","Input Device","Network","UserSession","RemoteDesktop" };
+
+    private string _institution = "", _agent = "", _category = "", _eventType = "", _user = "";
+    private DateTime? _fromDate, _toDate;
+    private bool _loading;
+    private ReportResultDto? _result;
+    private string _summaryLine = "";
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+    private Guid? _myInstitution;
+
+    private string Fmt(DateTime utc) => utc.Add(_tzOffset).ToString("yyyy-MM-dd HH:mm:ss");
+
+    protected override async Task OnAfterRenderAsync(bool first)
+    {
+        if (first && !_tzFetched) { _tzFetched = true; _tzOffset = await TZ.GetOffsetAsync(); StateHasChanged(); }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
+        if (Guid.TryParse(auth.User.FindFirst("institution_id")?.Value, out var g)) _myInstitution = g;
+        if (_isSuperAdmin) _institutions = await Api.GetInstitutionsAsync() ?? [];
+        await LoadAgents();
+    }
+
+    private async Task OnInstitutionChanged() { _agent = ""; await LoadAgents(); }
+
+    private async Task LoadAgents()
+    {
+        var all = await Api.GetAgentsAsync() ?? [];
+        Guid? inst = _isSuperAdmin ? (Guid.TryParse(_institution, out var g) ? g : null) : _myInstitution;
+        _agents = inst.HasValue ? all.Where(a => a.InstitutionId == inst.Value).ToList() : all;
+    }
+
+    private async Task GenerateAsync()
+    {
+        _loading = true;
+        Guid? inst = _isSuperAdmin ? (Guid.TryParse(_institution, out var gi) ? gi : null) : _myInstitution;
+        List<Guid>? agentIds = Guid.TryParse(_agent, out var ga) ? new List<Guid> { ga } : null;
+
+        // Convert local date filters to UTC bounds
+        DateTime? fromUtc = _fromDate.HasValue ? DateTime.SpecifyKind(_fromDate.Value, DateTimeKind.Utc).Subtract(_tzOffset) : null;
+        DateTime? toUtc   = _toDate.HasValue   ? DateTime.SpecifyKind(_toDate.Value.AddDays(1), DateTimeKind.Utc).Subtract(_tzOffset) : null;
+
+        var req = new ReportRequest(inst, agentIds, fromUtc, toUtc,
+            string.IsNullOrEmpty(_category) ? null : _category,
+            string.IsNullOrEmpty(_eventType) ? null : _eventType,
+            null,
+            null,
+            string.IsNullOrEmpty(_user) ? null : _user);
+
+        _result = await Api.GenerateReportAsync(req);
+        _summaryLine = BuildSummary();
+        _loading = false;
+    }
+
+    private string BuildSummary()
+    {
+        var parts = new List<string>();
+        if (_isSuperAdmin && Guid.TryParse(_institution, out var gi))
+            parts.Add("Institution: " + (_institutions.FirstOrDefault(i => i.Id == gi)?.Name ?? "—"));
+        if (Guid.TryParse(_agent, out var ga))
+            parts.Add("Device: " + (_agents.FirstOrDefault(a => a.Id == ga)?.MachineName ?? "—"));
+        if (_fromDate.HasValue) parts.Add("From " + _fromDate.Value.ToString("yyyy-MM-dd"));
+        if (_toDate.HasValue)   parts.Add("To " + _toDate.Value.ToString("yyyy-MM-dd"));
+        if (!string.IsNullOrEmpty(_category))  parts.Add("Category: " + _category);
+        if (!string.IsNullOrEmpty(_eventType)) parts.Add("Event: " + _eventType);
+        if (!string.IsNullOrEmpty(_user))      parts.Add("User contains: " + _user);
+        return parts.Count > 0 ? string.Join("  ·  ", parts) : "All events";
+    }
+
+    private async Task PrintAsync() => await JS.InvokeVoidAsync("window.print");
+}

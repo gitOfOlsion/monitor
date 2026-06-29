@@ -357,3 +357,35 @@ public class AppInstallConfig
     public List<string> BlockedExtensions { get; set; } = new() { ".bat", ".cmd", ".ps1", ".vbs", ".scr", ".js" };
     public int          MaxSizeMb         { get; set; } = 200;
 }
+
+// ── Reporting ───────────────────────────────────────────────────────────────
+public record ReportRequest(
+    Guid?       InstitutionId,
+    List<Guid>? AgentIds,
+    DateTime?   FromUtc,
+    DateTime?   ToUtc,
+    string?     Category,
+    string?     EventType,
+    string?     Status,
+    string?     MachineContains,
+    string?     UserContains
+);
+
+public class ReportRowDto
+{
+    public DateTime Timestamp    { get; set; }
+    public string   MachineName  { get; set; } = "";
+    public string?  LoggedInUser { get; set; }
+    public string   EventType    { get; set; } = "";
+    public string   FriendlyName { get; set; } = "";
+    public string   Category     { get; set; } = "";
+    public string   Status       { get; set; } = "";
+}
+
+public class ReportResultDto
+{
+    public List<ReportRowDto> Rows { get; set; } = [];
+    public int    TotalRows        { get; set; }
+    public bool   Truncated        { get; set; }   // true if hit the 5000 cap
+    public DateTime GeneratedAtUtc { get; set; } = DateTime.UtcNow;
+}

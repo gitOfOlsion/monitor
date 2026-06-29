@@ -225,6 +225,34 @@ public class AgentService
         return await q.OrderByDescending(e => e.Timestamp).Take(count).ToListAsync();
     }
 
+    /// <summary>
+    /// Rich, filtered query for reporting. All filters are optional and combine with AND.
+    /// Returns up to 5000 rows (a report is meant to be a bounded, printable document).
+    /// </summary>
+    public async Task<List<DeviceEventEntity>> GetEventsReportAsync(
+        Guid? institutionId, List<Guid>? agentIds, DateTime? fromUtc, DateTime? toUtc,
+        string? category, string? eventType, string? status, string? machineContains, string? userContains)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var q = db.DeviceEvents.Include(e => e.Agent).AsQueryable();
+
+        if (institutionId.HasValue) q = q.Where(e => e.Agent.InstitutionId == institutionId.Value);
+        if (agentIds is { Count: > 0 }) q = q.Where(e => agentIds.Contains(e.AgentId));
+        if (fromUtc.HasValue) q = q.Where(e => e.Timestamp >= fromUtc.Value);
+        if (toUtc.HasValue)   q = q.Where(e => e.Timestamp <= toUtc.Value);
+        if (!string.IsNullOrWhiteSpace(category))  q = q.Where(e => e.Category == category);
+        if (!string.IsNullOrWhiteSpace(eventType)) q = q.Where(e => e.EventType == eventType);
+        if (!string.IsNullOrWhiteSpace(status))    q = q.Where(e => e.Status == status);
+        if (!string.IsNullOrWhiteSpace(machineContains))
+            q = q.Where(e => e.MachineName.ToLower().Contains(machineContains.ToLower()));
+        // "User" filter matches the agent's currently-recorded logged-in user
+        if (!string.IsNullOrWhiteSpace(userContains))
+            q = q.Where(e => e.Agent.LoggedInUser != null &&
+                             e.Agent.LoggedInUser.ToLower().Contains(userContains.ToLower()));
+
+        return await q.OrderByDescending(e => e.Timestamp).Take(5000).ToListAsync();
+    }
+
     public async Task MarkStaleOfflineAsync(TimeSpan staleness)
     {
         await using var db = await _db.CreateDbContextAsync();
