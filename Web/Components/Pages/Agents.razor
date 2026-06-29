@@ -189,6 +189,9 @@ else
                                         <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => DownloadFileAsync(f.Name)" disabled="@_filesDownloading">
                                             ⬇ Download
                                         </button>
+                                        <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => DeleteFileAsync(f.Name)" disabled="@_filesDeleting">
+                                            🗑 Delete
+                                        </button>
                                     </td>
                                 </tr>
                             }
@@ -326,7 +329,7 @@ else
     private AgentDto? _filesAgent;
     private string? _filesFolderPath;
     private List<SharedFileDto> _filesList = [];
-    private bool _filesLoading, _filesUploading, _filesDownloading;
+    private bool _filesLoading, _filesUploading, _filesDownloading, _filesDeleting;
     private string? _filesMessage;
     private bool _filesMessageOk;
 
@@ -405,6 +408,20 @@ else
         var base64 = Convert.ToBase64String(bytes);
         var mime   = "application/octet-stream";
         await JS.InvokeVoidAsync("pmDownloadFile", fileName, mime, base64);
+    }
+
+    private async Task DeleteFileAsync(string fileName)
+    {
+        if (_filesAgent == null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Delete \"{fileName}\" from {_filesAgent.MachineName}? This cannot be undone."))
+            return;
+
+        _filesDeleting = true;
+        var (ok, err) = await Api.DeleteSharedFileAsync(_filesAgent.Id, fileName);
+        _filesDeleting = false;
+        _filesMessageOk = ok;
+        _filesMessage = ok ? $"Deleted {fileName}." : (err ?? "Delete failed.");
+        if (ok) await LoadFilesAsync(_filesAgent);
     }
 
     private static string FormatSize(long bytes) => bytes switch

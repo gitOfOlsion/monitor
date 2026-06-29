@@ -295,29 +295,27 @@ public class AgentWorker : BackgroundService
             var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
             scope.Connect();
 
-            // CPU: Win32_PerfFormattedData_PerfOS_Processor _Total instance gives the
-            // same averaged "% Processor Time" Task Manager shows — far more accurate
-            // than Win32_Processor.LoadPercentage (a coarse instantaneous snapshot).
-            using (var q = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery(
-                    "SELECT PercentProcessorTime FROM Win32_PerfFormattedData_PerfOS_Processor WHERE Name='_Total'")))
+            // CPU via two raw-counter samples 250ms apart. PercentProcessorTime on the
+            // raw class is cumulative "100ns busy" units per processor; we use the
+            // _Total instance's PercentProcessorTime + TimeStamp_Sys100NS pair and the
+            // standard formula: busy% = 100 * (1 - idleDelta/totalDelta).
+            // Simpler & robust: use PerfRawData PercentIdleTime is not present, so we
+            // sample the formatted class TWICE — the second read returns a real value.
+            double ReadFormattedCpu()
             {
+                using var q = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery(
+                        "SELECT PercentProcessorTime FROM Win32_PerfFormattedData_PerfOS_Processor WHERE Name='_Total'"));
                 foreach (System.Management.ManagementObject o in q.Get())
-                {
-                    cpu = Convert.ToDouble(o["PercentProcessorTime"]);
-                    break;
-                }
+                    if (o["PercentProcessorTime"] != null)
+                        return Convert.ToDouble(o["PercentProcessorTime"]);
+                return -1;
             }
-            // Fallback if perf class unavailable
-            if (cpu == null)
-            {
-                using var q2 = new System.Management.ManagementObjectSearcher(scope,
-                    new System.Management.ObjectQuery("SELECT LoadPercentage FROM Win32_Processor"));
-                double sum = 0; int n = 0;
-                foreach (System.Management.ManagementObject o in q2.Get())
-                    if (o["LoadPercentage"] != null) { sum += Convert.ToDouble(o["LoadPercentage"]); n++; }
-                if (n > 0) cpu = sum / n;
-            }
+            // First read primes the counter; second (after a short wait) is accurate.
+            ReadFormattedCpu();
+            System.Threading.Thread.Sleep(300);
+            var c = ReadFormattedCpu();
+            if (c >= 0) cpu = c;
 
             // RAM (KB → bytes)
             using (var q = new System.Management.ManagementObjectSearcher(scope,
@@ -331,28 +329,29 @@ public class AgentWorker : BackgroundService
                 }
             }
 
-            // Disk activity %: _Total instance of PercentDiskTime (Task Manager "Disk %").
-            // Can exceed 100 on busy multi-disk systems, so clamp.
-            using (var q = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery(
-                    "SELECT PercentDiskTime FROM Win32_PerfFormattedData_PerfDisk_PhysicalDisk WHERE Name='_Total'")))
+            // Disk activity: formatted PercentDiskTime, sampled twice like CPU.
+            double ReadDisk()
             {
+                using var q = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery(
+                        "SELECT PercentDiskTime FROM Win32_PerfFormattedData_PerfDisk_PhysicalDisk WHERE Name='_Total'"));
                 foreach (System.Management.ManagementObject o in q.Get())
-                {
-                    diskActive = Math.Min(100.0, Convert.ToDouble(o["PercentDiskTime"]));
-                    break;
-                }
+                    if (o["PercentDiskTime"] != null)
+                        return Convert.ToDouble(o["PercentDiskTime"]);
+                return -1;
             }
+            var d = ReadDisk();
+            if (d >= 0) diskActive = Math.Min(100.0, d);
 
-            // Network: sum BytesTotalPerSec across all non-loopback interfaces → KB/s
+            // Network: formatted BytesTotalPerSec, summed across interfaces (already a rate).
             using (var q = new System.Management.ManagementObjectSearcher(scope,
                 new System.Management.ObjectQuery(
                     "SELECT BytesTotalPerSec FROM Win32_PerfFormattedData_Tcpip_NetworkInterface")))
             {
-                double totalBytes = 0;
+                double totalBytes = 0; bool any = false;
                 foreach (System.Management.ManagementObject o in q.Get())
-                    if (o["BytesTotalPerSec"] != null) totalBytes += Convert.ToDouble(o["BytesTotalPerSec"]);
-                netKbps = totalBytes / 1024.0;
+                    if (o["BytesTotalPerSec"] != null) { totalBytes += Convert.ToDouble(o["BytesTotalPerSec"]); any = true; }
+                if (any) netKbps = totalBytes / 1024.0;
             }
         }
         catch { /* non-fatal */ }
@@ -655,6 +654,14 @@ public class AgentWorker : BackgroundService
             var result = await _files.ReadFileAsync(req);
             try { await _hub!.SendAsync("FilePullResult", result); }
             catch (Exception ex) { _log.LogWarning(ex, "Failed to send pull result"); }
+        });
+
+        _hub.On<FileDeleteRequest>("DeleteFile", async req =>
+        {
+            _log.LogInformation("Deleting shared file: {Name}", req.FileName);
+            var result = _files.DeleteFile(req);
+            try { await _hub!.SendAsync("FileDeleteResult", result); }
+            catch (Exception ex) { _log.LogWarning(ex, "Failed to send delete result"); }
         });
 
         _hub.On<string>("ListSharedFolder", async commandId =>

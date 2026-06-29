@@ -224,6 +224,37 @@ public class AgentsController : ScopedController
         return File(bytes, "application/octet-stream", result.FileName);
     }
 
+    /// <summary>Delete a file from the agent's shared folder. Filename only (no paths).</summary>
+    [HttpDelete("{id:guid}/files")]
+    public async Task<IActionResult> DeleteFile(Guid id, [FromQuery] string fileName)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
+        if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+
+        var connectionId = _connections.GetConnectionId(id);
+        if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
+
+        if (string.IsNullOrWhiteSpace(fileName) || fileName.Contains('/') || fileName.Contains('\\') || fileName.Contains(".."))
+            return BadRequest(new { error = "Invalid file name" });
+
+        var commandId = Guid.NewGuid().ToString("N");
+        var payload   = new FileDeleteRequest(commandId, fileName);
+
+        var waitTask = _connections.WaitForResult<FileDeleteResult>(commandId, TimeSpan.FromSeconds(30),
+            () => new FileDeleteResult(commandId, false, "Timed out waiting for agent response"));
+        await _hub.Clients.Client(connectionId).SendAsync("DeleteFile", payload);
+        var result = await waitTask;
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.file.delete",
+            $"{agent.MachineName}:{fileName}", result.Success ? "ok" : $"failed: {result.Message}", c.Ip);
+
+        if (!result.Success) return BadRequest(new { error = result.Message });
+        return Ok(new { message = result.Message });
+    }
+
     /// <summary>
     /// Generate a Guacamole connection URL for web-based RDP/VNC access to this agent.
     /// Uses Guacamole's guacamole-auth-json extension: we build a signed+encrypted JSON
