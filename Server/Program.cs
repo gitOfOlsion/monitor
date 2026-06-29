@@ -79,6 +79,7 @@ try
     builder.Services.AddSingleton<MetricsService>();
     builder.Services.AddHttpClient();
     builder.Services.AddScoped<UserService>();
+    builder.Services.AddScoped<FeatureService>();
     builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
@@ -111,6 +112,18 @@ try
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""DiskInfo"" TEXT;
             ALTER TABLE ""device_events"" ADD COLUMN IF NOT EXISTS ""EventId"" UUID NOT NULL DEFAULT gen_random_uuid();
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_device_events_EventId"" ON ""device_events"" (""EventId"");
+            CREATE TABLE IF NOT EXISTS ""feature_flags"" (
+                ""Id""         BIGSERIAL PRIMARY KEY,
+                ""FeatureKey"" TEXT NOT NULL,
+                ""Scope""      TEXT NOT NULL,
+                ""ScopeId""    UUID NOT NULL,
+                ""Enabled""    BOOLEAN NOT NULL,
+                ""ConfigJson"" TEXT,
+                ""UpdatedAt""  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                ""UpdatedBy""  TEXT
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS ""IX_feature_flags_key_scope"" ON ""feature_flags"" (""FeatureKey"", ""Scope"", ""ScopeId"");
+            CREATE INDEX IF NOT EXISTS ""IX_feature_flags_scope"" ON ""feature_flags"" (""Scope"", ""ScopeId"");
         ";
         await cmd.ExecuteNonQueryAsync();
 

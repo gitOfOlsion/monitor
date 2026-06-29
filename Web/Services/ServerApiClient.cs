@@ -74,6 +74,27 @@ public class ServerApiClient
     public Task<List<InstitutionDto>?> GetInstitutionsAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<InstitutionDto>>("/api/institutions"); }
 
+    // ── Feature management ───────────────────────────────────────────────────
+    public Task<List<FeatureStateDto>?> GetFeaturesAsync(Guid? institutionId = null, Guid? agentId = null)
+    {
+        AttachIdentity();
+        var qs = new List<string>();
+        if (institutionId.HasValue) qs.Add($"institutionId={institutionId}");
+        if (agentId.HasValue)       qs.Add($"agentId={agentId}");
+        var url = "/api/features" + (qs.Count > 0 ? "?" + string.Join("&", qs) : "");
+        return _http.GetFromJsonAsync<List<FeatureStateDto>>(url);
+    }
+
+    public async Task<(bool ok, string? error)> SetFeatureAsync(SetFeatureFlagRequest req)
+    {
+        AttachIdentity();
+        var r = await _http.PostAsJsonAsync("/api/features", req);
+        if (r.IsSuccessStatusCode) return (true, null);
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, err?.Error ?? "Failed to update feature");
+    }
+
+
     public async Task<InstitutionDto?> CreateInstitutionAsync(string name, string type, string email)
     {
         AttachIdentity();

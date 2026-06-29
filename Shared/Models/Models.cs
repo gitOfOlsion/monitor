@@ -291,3 +291,69 @@ public class SharedFileDto
     public long     SizeBytes  { get; set; }
     public DateTime ModifiedAt { get; set; }
 }
+
+// ── Feature management ──────────────────────────────────────────────────────
+// The feature CATALOG is static (defined in code) so the UI knows what exists.
+// Flags only store overrides. Resolution: agent → institution → default.
+
+/// <summary>Static definition of a manageable feature.</summary>
+public record FeatureDefinition(
+    string  Key,
+    string  Name,
+    string  Description,
+    string  Icon,
+    bool    DefaultEnabled,
+    bool    HasConfig            // true if the feature carries extra JSON config
+);
+
+public static class FeatureCatalog
+{
+    public const string FileShare     = "file-share";
+    public const string RemoteDesktop = "remote-desktop";
+    public const string PowerControl  = "power-control";
+    public const string AppInstall    = "app-install";
+
+    public static readonly List<FeatureDefinition> All = new()
+    {
+        new(FileShare,     "File Share",            "Upload, download and delete files in the device's shared folder.", "📁", true,  false),
+        new(RemoteDesktop, "Remote Desktop",        "Browser-based RDP/VNC access to the device.",                       "🖥️", true,  false),
+        new(PowerControl,  "Restart / Shutdown",    "Remotely restart, shut down, or cancel a pending power action.",    "⏻", true,  false),
+        new(AppInstall,    "Software Deployment",   "Admin-initiated installation of approved executables on the device.","📦", false, true),
+    };
+
+    public static FeatureDefinition? Find(string key) => All.FirstOrDefault(f => f.Key == key);
+}
+
+/// <summary>Effective (resolved) state of one feature for a given scope.</summary>
+public class FeatureStateDto
+{
+    public string  Key            { get; set; } = "";
+    public string  Name           { get; set; } = "";
+    public string  Description    { get; set; } = "";
+    public string  Icon           { get; set; } = "";
+    public bool    HasConfig      { get; set; }
+    public bool    DefaultEnabled { get; set; }
+    // Institution-level override (null = not set, inherits default)
+    public bool?   InstitutionEnabled { get; set; }
+    // Agent-level override (only populated when querying a specific agent)
+    public bool?   AgentEnabled   { get; set; }
+    // The effective value after resolution
+    public bool    Effective      { get; set; }
+    public string? ConfigJson     { get; set; }
+}
+
+public record SetFeatureFlagRequest(
+    string  FeatureKey,
+    string  Scope,         // "Institution" | "Agent"
+    Guid    ScopeId,
+    bool?   Enabled,       // null = clear the override (revert to inherited/default)
+    string? ConfigJson
+);
+
+/// <summary>Config payload for the app-install / software-deployment feature.</summary>
+public class AppInstallConfig
+{
+    public List<string> AllowedExtensions { get; set; } = new() { ".exe", ".msi" };
+    public List<string> BlockedExtensions { get; set; } = new() { ".bat", ".cmd", ".ps1", ".vbs", ".scr", ".js" };
+    public int          MaxSizeMb         { get; set; } = 200;
+}

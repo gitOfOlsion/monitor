@@ -115,6 +115,24 @@ public class AuditLogEntity
     public string?  IpAddress     { get; set; }
 }
 
+/// <summary>
+/// A feature on/off override at either Institution or Agent scope. The feature
+/// CATALOG (keys, names, defaults, config schema) lives in code (FeatureCatalog);
+/// this table stores only explicit overrides. Resolution is two-tier:
+/// agent override → institution override → catalog default.
+/// </summary>
+public class FeatureFlagEntity
+{
+    public long     Id         { get; set; }
+    public string   FeatureKey { get; set; } = "";       // e.g. "file-share", "remote-desktop"
+    public string   Scope      { get; set; } = "";       // "Institution" | "Agent"
+    public Guid     ScopeId    { get; set; }              // institution id or agent id
+    public bool     Enabled    { get; set; }
+    public string?  ConfigJson { get; set; }              // optional feature-specific settings
+    public DateTime UpdatedAt  { get; set; } = DateTime.UtcNow;
+    public string?  UpdatedBy  { get; set; }
+}
+
 // ── DbContext ─────────────────────────────────────────────────────────────
 public class AppDbContext : IdentityDbContext<AppUser>
 {
@@ -126,6 +144,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<DeviceCategoryEntity> DeviceCategories=> Set<DeviceCategoryEntity>();
     public DbSet<DeviceEventEntity>    DeviceEvents    => Set<DeviceEventEntity>();
     public DbSet<AuditLogEntity>       AuditLogs       => Set<AuditLogEntity>();
+    public DbSet<FeatureFlagEntity>    FeatureFlags    => Set<FeatureFlagEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -214,6 +233,15 @@ public class AppDbContext : IdentityDbContext<AppUser>
             e.HasIndex(a => a.Timestamp);
             e.HasIndex(a => a.InstitutionId);
             e.HasIndex(a => a.Actor);
+        });
+
+        b.Entity<FeatureFlagEntity>(e =>
+        {
+            e.ToTable("feature_flags");
+            e.HasKey(f => f.Id);
+            // One row per feature per scope target
+            e.HasIndex(f => new { f.FeatureKey, f.Scope, f.ScopeId }).IsUnique();
+            e.HasIndex(f => new { f.Scope, f.ScopeId });
         });
     }
 }

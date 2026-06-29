@@ -46,10 +46,11 @@ public class AgentsController : ScopedController
     private readonly IConfiguration _config;
     private readonly IHttpClientFactory _httpFactory;
     private readonly MetricsService _metrics;
+    private readonly FeatureService _features;
     private readonly ILogger<AgentsController> _log;
 
-    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config, IHttpClientFactory httpFactory, MetricsService metrics, ILogger<AgentsController> log)
-    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; _httpFactory = httpFactory; _metrics = metrics; _log = log; }
+    public AgentsController(AgentService svc, AuditService audit, AgentConnectionRegistry connections, TunnelManager tunnels, IHubContext<MonitorHub> hub, IConfiguration config, IHttpClientFactory httpFactory, MetricsService metrics, FeatureService features, ILogger<AgentsController> log)
+    { _svc = svc; _audit = audit; _connections = connections; _tunnels = tunnels; _hub = hub; _config = config; _httpFactory = httpFactory; _metrics = metrics; _features = features; _log = log; }
 
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
@@ -118,6 +119,9 @@ public class AgentsController : ScopedController
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
 
+        if (!await _features.IsEnabledAsync(FeatureCatalog.PowerControl, id))
+            return BadRequest(new { error = "The Restart/Shutdown feature is disabled for this device." });
+
         var connectionId = _connections.GetConnectionId(id);
         if (connectionId == null)
             return BadRequest(new { error = "Agent is offline — cannot send command" });
@@ -147,6 +151,8 @@ public class AgentsController : ScopedController
         var c = Caller();
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+        if (!await _features.IsEnabledAsync(FeatureCatalog.FileShare, id))
+            return BadRequest(new { error = "The File Share feature is disabled for this device." });
 
         var connectionId = _connections.GetConnectionId(id);
         if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
@@ -170,6 +176,8 @@ public class AgentsController : ScopedController
 
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+        if (!await _features.IsEnabledAsync(FeatureCatalog.FileShare, id))
+            return BadRequest(new { error = "The File Share feature is disabled for this device." });
 
         var connectionId = _connections.GetConnectionId(id);
         if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
@@ -200,6 +208,8 @@ public class AgentsController : ScopedController
 
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+        if (!await _features.IsEnabledAsync(FeatureCatalog.FileShare, id))
+            return BadRequest(new { error = "The File Share feature is disabled for this device." });
 
         var connectionId = _connections.GetConnectionId(id);
         if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
@@ -233,6 +243,8 @@ public class AgentsController : ScopedController
 
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+        if (!await _features.IsEnabledAsync(FeatureCatalog.FileShare, id))
+            return BadRequest(new { error = "The File Share feature is disabled for this device." });
 
         var connectionId = _connections.GetConnectionId(id);
         if (connectionId == null) return BadRequest(new { error = "Agent is offline" });
@@ -277,6 +289,8 @@ public class AgentsController : ScopedController
 
         var agent = await _svc.GetAgentByIdAsync(id, c.Scope);
         if (agent == null) return NotFound(new { error = "Agent not found or out of scope" });
+        if (!await _features.IsEnabledAsync(FeatureCatalog.RemoteDesktop, id))
+            return BadRequest(new { error = "The Remote Desktop feature is disabled for this device." });
 
         if (!_connections.IsOnline(id))
             return NotFound(new { error = "Agent is offline — cannot open a remote desktop tunnel." });
@@ -467,6 +481,84 @@ public class UsersController : ScopedController
         var (ok, error) = await _users.DeleteUserAsync(id, c.Role, c.InstitutionId, c.Actor);
         if (!ok) return BadRequest(new { error });
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "user.delete", id, null, c.Ip);
+        return Ok();
+    }
+}
+
+// ── Feature management ──────────────────────────────────────────────────────
+[ApiController, Route("api/features"), AllowAnonymous]
+public class FeaturesController : ScopedController
+{
+    private readonly FeatureService _features;
+    private readonly AgentService   _agents;
+    private readonly AuditService   _audit;
+    public FeaturesController(FeatureService features, AgentService agents, AuditService audit)
+    { _features = features; _agents = agents; _audit = audit; }
+
+    /// <summary>
+    /// Feature states for an institution (and optionally a specific agent's overrides).
+    /// SuperAdmin must pass institutionId; InstitutionAdmin is locked to their own.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> Get([FromQuery] Guid? institutionId, [FromQuery] Guid? agentId)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        Guid instId;
+        if (c.Role == "SuperAdmin")
+        {
+            // If an agent is specified, derive its institution; else require institutionId
+            if (agentId.HasValue)
+            {
+                var a = await _agents.GetAgentByIdAsync(agentId.Value, null);
+                if (a == null) return NotFound(new { error = "Agent not found" });
+                instId = a.InstitutionId;
+            }
+            else if (institutionId.HasValue) instId = institutionId.Value;
+            else return BadRequest(new { error = "institutionId required" });
+        }
+        else
+        {
+            if (c.InstitutionId == null) return Forbid();
+            instId = c.InstitutionId.Value;
+            // Guard: an agent override view must belong to the caller's institution
+            if (agentId.HasValue)
+            {
+                var a = await _agents.GetAgentByIdAsync(agentId.Value, c.Scope);
+                if (a == null) return NotFound(new { error = "Agent not found or out of scope" });
+            }
+        }
+
+        var states = await _features.GetStatesAsync(instId, agentId);
+        return Ok(states);
+    }
+
+    /// <summary>Set or clear a feature override at institution or agent scope.</summary>
+    [HttpPost]
+    public async Task<IActionResult> Set([FromBody] SetFeatureFlagRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        // Authorisation: InstitutionAdmin may only touch their own institution / its agents
+        if (c.Role == "InstitutionAdmin")
+        {
+            if (req.Scope == "Institution" && req.ScopeId != c.InstitutionId)
+                return Forbid();
+            if (req.Scope == "Agent")
+            {
+                var a = await _agents.GetAgentByIdAsync(req.ScopeId, c.Scope);
+                if (a == null) return Forbid();
+            }
+        }
+
+        try { await _features.SetAsync(req, c.Actor); }
+        catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
+
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "feature.set",
+            $"{req.FeatureKey}@{req.Scope}:{req.ScopeId}",
+            req.Enabled?.ToString() ?? "cleared", c.Ip);
         return Ok();
     }
 }
