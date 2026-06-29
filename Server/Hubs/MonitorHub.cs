@@ -12,10 +12,11 @@ public class MonitorHub : Hub
     private readonly AgentConnectionRegistry _connections;
     private readonly TunnelManager _tunnels;
     private readonly MetricsService _metrics;
+    private readonly FeatureService _features;
     private readonly ILogger<MonitorHub> _log;
 
-    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, TunnelManager tunnels, MetricsService metrics, ILogger<MonitorHub> log)
-    { _agents = agents; _connections = connections; _tunnels = tunnels; _metrics = metrics; _log = log; }
+    public MonitorHub(AgentService agents, AgentConnectionRegistry connections, TunnelManager tunnels, MetricsService metrics, FeatureService features, ILogger<MonitorHub> log)
+    { _agents = agents; _connections = connections; _tunnels = tunnels; _metrics = metrics; _features = features; _log = log; }
 
     public async Task AgentHeartbeat(HeartbeatPayload p)
     {
@@ -25,9 +26,14 @@ public class MonitorHub : Hub
             p.LoggedInUser, p.CpuName, p.CpuCores, p.RamMb, p.DiskInfo);
         if (agentId != Guid.Empty)
         {
+            // Detect a new/changed connection for this agent → (re)push its policy once.
+            var wasNewConnection = _connections.GetConnectionId(agentId) != Context.ConnectionId;
             _connections.Register(agentId, Context.ConnectionId);
             _metrics.Record(agentId, p.CpuPercent, p.RamPercent, p.DiskPercent, p.RamUsedMb,
                             p.DiskActivePercent, p.NetworkKbps);
+
+            if (wasNewConnection)
+                await PushAppControlPolicyAsync(agentId);
         }
 
         await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnAgentHeartbeat", p);
@@ -40,6 +46,41 @@ public class MonitorHub : Hub
             await Clients.Group("superadmin").SendAsync("OnDeviceChanged", userEvent);
         }
     }
+
+    /// <summary>
+    /// Resolve the Application Control policy for an agent and push it down the
+    /// connection. If the feature is disabled, sends a disabled policy so the agent
+    /// tears down any active enforcement.
+    /// </summary>
+    private async Task PushAppControlPolicyAsync(Guid agentId)
+    {
+        try
+        {
+            var enabled = await _features.IsEnabledAsync(FeatureCatalog.AppInstall, agentId);
+            AppControlPolicy policy;
+            if (enabled)
+            {
+                var json = await _features.GetConfigAsync(FeatureCatalog.AppInstall, agentId);
+                policy = string.IsNullOrWhiteSpace(json)
+                    ? new AppControlPolicy { Enabled = true }
+                    : (System.Text.Json.JsonSerializer.Deserialize<AppControlPolicy>(json) ?? new AppControlPolicy())
+                      is var p2 ? p2 : new AppControlPolicy();
+                policy.Enabled = true;
+            }
+            else
+            {
+                policy = new AppControlPolicy { Enabled = false };
+            }
+
+            var conn = _connections.GetConnectionId(agentId);
+            if (conn != null)
+                await Clients.Client(conn).SendAsync("ApplyAppControlPolicy", policy);
+        }
+        catch (Exception ex) { _log.LogWarning(ex, "Failed to push AppControl policy to {Agent}", agentId); }
+    }
+
+    /// <summary>Called by the API when policy changes, to re-push to a live agent.</summary>
+    public Task RepushPolicy(Guid agentId) => PushAppControlPolicyAsync(agentId);
 
     public async Task DeviceChanged(DeviceChangedPayload p)
     {

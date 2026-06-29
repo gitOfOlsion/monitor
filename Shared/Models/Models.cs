@@ -312,13 +312,15 @@ public static class FeatureCatalog
     public const string RemoteDesktop = "remote-desktop";
     public const string PowerControl  = "power-control";
     public const string AppInstall    = "app-install";
+    public const string Reports       = "reports";
 
     public static readonly List<FeatureDefinition> All = new()
     {
         new(FileShare,     "File Share",            "Upload, download and delete files in the device's shared folder.", "📁", true,  false),
         new(RemoteDesktop, "Remote Desktop",        "Browser-based RDP/VNC access to the device.",                       "🖥️", true,  false),
         new(PowerControl,  "Restart / Shutdown",    "Remotely restart, shut down, or cancel a pending power action.",    "⏻", true,  false),
-        new(AppInstall,    "Software Deployment",   "Admin-initiated installation of approved executables on the device.","📦", false, true),
+        new(Reports,       "Reports",               "Generate and print filtered event reports for devices.",            "📄", false, false),
+        new(AppInstall,    "Application Control",   "Block users from installing or running disallowed file types (e.g. games, unapproved software) on the device.", "🛡️", false, true),
     };
 
     public static FeatureDefinition? Find(string key) => All.FirstOrDefault(f => f.Key == key);
@@ -351,6 +353,21 @@ public record SetFeatureFlagRequest(
 );
 
 /// <summary>Config payload for the app-install / software-deployment feature.</summary>
+/// <summary>
+/// Application Control policy (block model). When the feature is enabled for a
+/// device, the agent blocks execution of files matching these rules for the
+/// logged-in user. Block wins; the allow list is an exception carve-out.
+/// </summary>
+public class AppControlPolicy
+{
+    public bool         Enabled           { get; set; }            // master switch (mirrors the feature flag)
+    public List<string> BlockedExtensions { get; set; } = new() { ".exe", ".msi" };  // e.g. games/installers
+    public List<string> BlockedNamePatterns { get; set; } = new();  // substrings, e.g. "steam", "epicgames"
+    public List<string> AllowedNamePatterns { get; set; } = new();  // carve-outs that override a block
+    public bool         BlockInstallers   { get; set; } = true;      // also block msiexec / *setup* / *install*
+}
+
+// Kept for backward compatibility with any stored config; superseded by AppControlPolicy.
 public class AppInstallConfig
 {
     public List<string> AllowedExtensions { get; set; } = new() { ".exe", ".msi" };

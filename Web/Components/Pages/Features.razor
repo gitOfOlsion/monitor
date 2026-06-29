@@ -1,5 +1,5 @@
 @page "/features"
-@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
+@attribute [Authorize(Roles = "SuperAdmin")]
 @using System.Security.Claims
 @inject ServerApiClient Api
 @inject AuthenticationStateProvider AuthState
@@ -105,12 +105,40 @@ else
                     </select>
                 </div>
             </div>
+
+            @if (f.HasConfig && f.Key == "app-install" && f.Effective)
+            {
+                <div class="pm-feature-config">
+                    <div class="pm-feature-config-title">🛡️ Application Control policy (block model)</div>
+                    <div class="pm-field">
+                        <label>Blocked file extensions (comma-separated)</label>
+                        <input class="pm-input pm-input-sm" @bind="_cfgBlockedExt" placeholder=".exe, .msi" />
+                    </div>
+                    <div class="pm-field">
+                        <label>Blocked name patterns (comma-separated, matches filename)</label>
+                        <input class="pm-input pm-input-sm" @bind="_cfgBlockedNames" placeholder="steam, epicgames, game" />
+                    </div>
+                    <div class="pm-field">
+                        <label>Allowed name patterns (exceptions that override a block)</label>
+                        <input class="pm-input pm-input-sm" @bind="_cfgAllowedNames" placeholder="vscode, teams" />
+                    </div>
+                    <label class="pm-checkbox">
+                        <input type="checkbox" @bind="_cfgBlockInstallers" />
+                        Also block installers (setup.exe, *install*, msiexec-launched)
+                    </label>
+                    <div style="margin-top:.5rem">
+                        <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="@(() => SaveAppControlConfig(f))">Save policy</button>
+                        <span class="pm-hint" style="margin-left:.5rem">Applies immediately to @(_scopeMode == "device" ? "this device" : "all devices in the institution") that are online.</span>
+                    </div>
+                </div>
+            }
         }
     </div>
 
     <p class="pm-hint" style="margin-top:1rem">
-        Note: the Software Deployment feature's allowed/blocked file types are configured when you use it
-        (coming in the deployment dashboard). Toggling it here controls whether it's available at all.
+        Application Control uses a block model: listed extensions / name patterns are blocked for the
+        logged-in user on the device; allowed patterns are exceptions. Enforcement is applied by the
+        agent (Windows). Toggling the feature off removes enforcement cleanly.
     </p>
 }
 
@@ -126,20 +154,18 @@ else
     private string? _msg; private bool _msgOk;
     private Guid? _myInstitution;
 
+    // App-control policy editor state
+    private string _cfgBlockedExt = ".exe, .msi";
+    private string _cfgBlockedNames = "";
+    private string _cfgAllowedNames = "";
+    private bool   _cfgBlockInstallers = true;
+
     protected override async Task OnInitializedAsync()
     {
+        // SuperAdmin-only page. Always start by choosing an institution.
         var auth = await AuthState.GetAuthenticationStateAsync();
         _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
-        var instClaim = auth.User.FindFirst("institution_id")?.Value;
-        if (Guid.TryParse(instClaim, out var g)) _myInstitution = g;
-
-        if (_isSuperAdmin)
-            _institutions = await Api.GetInstitutionsAsync() ?? [];
-        else
-        {
-            // Institution admin: locked to their own institution, load features immediately
-            await LoadFeatures();
-        }
+        _institutions = await Api.GetInstitutionsAsync() ?? [];
     }
 
     private Guid? CurrentInstitution =>
@@ -187,6 +213,55 @@ else
         _loading = true;
         _features = await Api.GetFeaturesAsync(inst, agentId) ?? [];
         _loading = false;
+
+        // Populate the policy editor from the app-control feature's stored config (if any)
+        var ac = _features.FirstOrDefault(f => f.Key == "app-install");
+        if (ac?.ConfigJson is { Length: > 0 } cj)
+        {
+            try
+            {
+                var p = System.Text.Json.JsonSerializer.Deserialize<AppControlPolicy>(cj);
+                if (p != null)
+                {
+                    _cfgBlockedExt      = string.Join(", ", p.BlockedExtensions);
+                    _cfgBlockedNames    = string.Join(", ", p.BlockedNamePatterns);
+                    _cfgAllowedNames    = string.Join(", ", p.AllowedNamePatterns);
+                    _cfgBlockInstallers = p.BlockInstallers;
+                }
+            }
+            catch { /* keep defaults */ }
+        }
+    }
+
+    private static List<string> SplitCsv(string s) =>
+        s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private async Task SaveAppControlConfig(FeatureStateDto f)
+    {
+        var inst = CurrentInstitution;
+        if (inst == null) return;
+
+        var policy = new AppControlPolicy
+        {
+            Enabled = true,
+            BlockedExtensions   = SplitCsv(_cfgBlockedExt).Select(e => e.StartsWith('.') ? e : "." + e).ToList(),
+            BlockedNamePatterns = SplitCsv(_cfgBlockedNames),
+            AllowedNamePatterns = SplitCsv(_cfgAllowedNames),
+            BlockInstallers     = _cfgBlockInstallers
+        };
+        var json = System.Text.Json.JsonSerializer.Serialize(policy);
+
+        // Persist config WITH enabled=true so the feature stays on; scope follows the editor.
+        SetFeatureFlagRequest req;
+        if (_scopeMode == "device" && Guid.TryParse(_selectedAgent, out var ag))
+            req = new SetFeatureFlagRequest(f.Key, "Agent", ag, true, json);
+        else
+            req = new SetFeatureFlagRequest(f.Key, "Institution", inst.Value, true, json);
+
+        var (ok, error) = await Api.SetFeatureAsync(req);
+        _msgOk = ok;
+        _msg = ok ? "Application Control policy saved and pushed to online devices." : (error ?? "Save failed.");
+        await LoadFeatures();
     }
 
     private async Task SetFeature(FeatureStateDto f, string? choice)

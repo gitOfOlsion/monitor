@@ -94,6 +94,9 @@ public class ServerApiClient
         return _http.GetFromJsonAsync<List<FeatureStateDto>>(url);
     }
 
+    public Task<List<FeatureStateDto>?> GetMyFeaturesAsync()
+    { AttachIdentity(); return _http.GetFromJsonAsync<List<FeatureStateDto>>("/api/features/mine"); }
+
     public async Task<(bool ok, string? error)> SetFeatureAsync(SetFeatureFlagRequest req)
     {
         AttachIdentity();

@@ -5,6 +5,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject TimeZoneService TZ
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 <PageTitle>Reports</PageTitle>
 
@@ -154,6 +155,16 @@
         var auth = await AuthState.GetAuthenticationStateAsync();
         _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
         if (Guid.TryParse(auth.User.FindFirst("institution_id")?.Value, out var g)) _myInstitution = g;
+
+        // Enforce the Reports feature flag for non-superadmins: if disabled for their
+        // institution, they shouldn't be here (the nav link is hidden, but guard direct nav too).
+        if (!_isSuperAdmin)
+        {
+            var mine = await Api.GetMyFeaturesAsync();
+            var on = mine?.FirstOrDefault(f => f.Key == "reports")?.Effective ?? false;
+            if (!on) { Nav.NavigateTo("/", replace: true); return; }
+        }
+
         if (_isSuperAdmin) _institutions = await Api.GetInstitutionsAsync() ?? [];
         await LoadAgents();
     }
