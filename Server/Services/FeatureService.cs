@@ -20,6 +20,21 @@ public sealed class FeatureService
     { _db = db; _log = log; }
 
     /// <summary>
+    /// Resolve a feature at INSTITUTION level only (for features that aren't
+    /// device-specific, like Reports). Institution override → catalog default.
+    /// </summary>
+    public async Task<bool> IsEnabledForInstitutionAsync(string featureKey, Guid institutionId)
+    {
+        var def = FeatureCatalog.Find(featureKey);
+        if (def == null) return false;
+
+        await using var db = await _db.CreateDbContextAsync();
+        var instFlag = await db.FeatureFlags.AsNoTracking().FirstOrDefaultAsync(
+            f => f.FeatureKey == featureKey && f.Scope == "Institution" && f.ScopeId == institutionId);
+        return instFlag?.Enabled ?? def.DefaultEnabled;
+    }
+
+    /// <summary>
     /// Resolve whether a feature is enabled for a specific agent, walking the
     /// override chain. If the agent isn't found, falls back to the catalog default.
     /// </summary>

@@ -432,3 +432,9 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
     .pm-report-table tr { page-break-inside: avoid; }
     @page { margin: 1.5cm; }
 }
+
+/* App-control policy editor */
+.pm-feature-config { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.25rem; margin: -0.25rem 0 .5rem 0; }
+.pm-feature-config-title { font-weight: 600; font-size: .9rem; margin-bottom: .6rem; }
+.pm-checkbox { display: flex; align-items: center; gap: .4rem; font-size: .85rem; margin-top: .4rem; }
+.pm-checkbox input { width: auto; }

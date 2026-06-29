@@ -25,9 +25,10 @@ public class AgentWorker : BackgroundService
     // Durable, restart- and reinstall-safe event storage (JSONL outbox + history
     // in %ProgramData%). Replaces the old in-memory queue that lost events on restart.
     private readonly EventStore _store;
+    private readonly AppControlEnforcer _appControl;
 
     public AgentWorker(IConfiguration c, IDeviceMonitor m, DiscoveryService d, CommandExecutor cmd, FileShareService files, TunnelClient tunnel, ILogger<AgentWorker> l)
-    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; _store = new EventStore(l); }
+    { _config = c; _monitor = m; _discovery = d; _commands = cmd; _files = files; _tunnel = tunnel; _log = l; _store = new EventStore(l); _appControl = new AppControlEnforcer(l); }
 
     /// <summary>Returns the currently logged-in interactive user, or null if none.</summary>
     // ── Win32 Terminal Services API (works from Session 0 services) ─────────
@@ -656,6 +657,12 @@ public class AgentWorker : BackgroundService
             catch (Exception ex) { _log.LogWarning(ex, "Failed to send pull result"); }
         });
 
+        _hub.On<AppControlPolicy>("ApplyAppControlPolicy", policy =>
+        {
+            _log.LogInformation("Received Application Control policy (enabled={En})", policy?.Enabled);
+            _appControl.Apply(policy);
+        });
+
         _hub.On<FileDeleteRequest>("DeleteFile", async req =>
         {
             _log.LogInformation("Deleting shared file: {Name}", req.FileName);
@@ -704,6 +711,7 @@ public class AgentWorker : BackgroundService
     {
         _monitor.DeviceChanged -= OnDeviceChanged;
         _monitor.Stop();
+        _appControl.Dispose();   // tears down the process watcher cleanly
         if (_hub?.State == HubConnectionState.Connected) await _hub.StopAsync(ct);
         _log.LogInformation("Agent stopped");
         await base.StopAsync(ct);

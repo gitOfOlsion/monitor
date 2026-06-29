@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
+@inject ServerApiClient Api
 
 <div class="pm-layout">
     <nav class="pm-sidebar">
@@ -41,16 +42,21 @@
                     <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="adminAuth">
                         <li class="pm-nav-divider"></li>
                         <li class="pm-nav-section">Administration</li>
-                        <li>
-                            <NavLink href="/features">
-                                <span class="pm-nav-icon">🎛️</span> Features
-                            </NavLink>
-                        </li>
-                        <li>
-                            <NavLink href="/reports">
-                                <span class="pm-nav-icon">📄</span> Reports
-                            </NavLink>
-                        </li>
+                        <AuthorizeView Roles="SuperAdmin" Context="featAuth">
+                            <li>
+                                <NavLink href="/features">
+                                    <span class="pm-nav-icon">🎛️</span> Features
+                                </NavLink>
+                            </li>
+                        </AuthorizeView>
+                        @if (_reportsEnabled)
+                        {
+                            <li>
+                                <NavLink href="/reports">
+                                    <span class="pm-nav-icon">📄</span> Reports
+                                </NavLink>
+                            </li>
+                        }
                         <li>
                             <NavLink href="/users">
                                 <span class="pm-nav-icon">👥</span> Users
@@ -97,3 +103,20 @@
         @Body
     </main>
 </div>
+
+@code {
+    private bool _reportsEnabled;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Resolve which feature-gated nav items to show for this user's institution.
+        // SuperAdmin's /mine returns all features enabled; InstitutionAdmin gets their
+        // institution's resolved flags. Viewers get 403 (caught) and see nothing extra.
+        try
+        {
+            var mine = await Api.GetMyFeaturesAsync();
+            _reportsEnabled = mine?.FirstOrDefault(f => f.Key == "reports")?.Effective ?? false;
+        }
+        catch { _reportsEnabled = false; }
+    }
+}

@@ -361,7 +361,8 @@ public record SendCommandRequest(string Type, int? DelaySeconds);
 public class EventsController : ScopedController
 {
     private readonly AgentService _svc;
-    public EventsController(AgentService svc) => _svc = svc;
+    private readonly FeatureService _features;
+    public EventsController(AgentService svc, FeatureService features) { _svc = svc; _features = features; }
 
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int count = 200, [FromQuery] Guid? agentId = null)
@@ -376,6 +377,12 @@ public class EventsController : ScopedController
 
         // Scope guard: non-superadmins are pinned to their own institution regardless of request.
         Guid? institutionId = c.IsSuperAdmin ? req.InstitutionId : c.InstitutionId;
+
+        // Reports is a managed feature. For an institution-scoped admin, enforce it.
+        // (SuperAdmin running an all-institutions report bypasses the per-institution gate.)
+        if (institutionId.HasValue &&
+            !await _features.IsEnabledForInstitutionAsync(FeatureCatalog.Reports, institutionId.Value))
+            return BadRequest(new { error = "The Reports feature is disabled for this institution." });
 
         var rows = await _svc.GetEventsReportAsync(
             institutionId, req.AgentIds, req.FromUtc, req.ToUtc,
@@ -520,8 +527,36 @@ public class FeaturesController : ScopedController
     private readonly FeatureService _features;
     private readonly AgentService   _agents;
     private readonly AuditService   _audit;
-    public FeaturesController(FeatureService features, AgentService agents, AuditService audit)
-    { _features = features; _agents = agents; _audit = audit; }
+    private readonly IHubContext<MonitorHub> _hub;
+    private readonly AgentConnectionRegistry _connections;
+    public FeaturesController(FeatureService features, AgentService agents, AuditService audit,
+                              IHubContext<MonitorHub> hub, AgentConnectionRegistry connections)
+    { _features = features; _agents = agents; _audit = audit; _hub = hub; _connections = connections; }
+
+    /// <summary>
+    /// Resolved feature states for the CALLER's own institution. Any admin may call
+    /// this (it's read-only and scoped to themselves) — used to drive nav/menu
+    /// visibility of feature-gated pages like Reports. SuperAdmin gets all features
+    /// as enabled (they manage everything).
+    /// </summary>
+    [HttpGet("mine")]
+    public async Task<IActionResult> GetMine()
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+
+        // SuperAdmin isn't institution-scoped; report every feature as available to them.
+        if (c.IsSuperAdmin)
+            return Ok(FeatureCatalog.All.Select(f => new FeatureStateDto
+            {
+                Key = f.Key, Name = f.Name, Description = f.Description, Icon = f.Icon,
+                HasConfig = f.HasConfig, DefaultEnabled = f.DefaultEnabled, Effective = true
+            }).ToList());
+
+        if (c.InstitutionId == null) return Forbid();
+        var states = await _features.GetStatesAsync(c.InstitutionId.Value, null);
+        return Ok(states);
+    }
 
     /// <summary>
     /// Feature states for an institution (and optionally a specific agent's overrides).
@@ -531,32 +566,18 @@ public class FeaturesController : ScopedController
     public async Task<IActionResult> Get([FromQuery] Guid? institutionId, [FromQuery] Guid? agentId)
     {
         var c = Caller();
-        if (c.Role == "Viewer") return Forbid();
+        // Feature management is SuperAdmin-only.
+        if (!c.IsSuperAdmin) return Forbid();
 
         Guid instId;
-        if (c.Role == "SuperAdmin")
+        if (agentId.HasValue)
         {
-            // If an agent is specified, derive its institution; else require institutionId
-            if (agentId.HasValue)
-            {
-                var a = await _agents.GetAgentByIdAsync(agentId.Value, null);
-                if (a == null) return NotFound(new { error = "Agent not found" });
-                instId = a.InstitutionId;
-            }
-            else if (institutionId.HasValue) instId = institutionId.Value;
-            else return BadRequest(new { error = "institutionId required" });
+            var a = await _agents.GetAgentByIdAsync(agentId.Value, null);
+            if (a == null) return NotFound(new { error = "Agent not found" });
+            instId = a.InstitutionId;
         }
-        else
-        {
-            if (c.InstitutionId == null) return Forbid();
-            instId = c.InstitutionId.Value;
-            // Guard: an agent override view must belong to the caller's institution
-            if (agentId.HasValue)
-            {
-                var a = await _agents.GetAgentByIdAsync(agentId.Value, c.Scope);
-                if (a == null) return NotFound(new { error = "Agent not found or out of scope" });
-            }
-        }
+        else if (institutionId.HasValue) instId = institutionId.Value;
+        else return BadRequest(new { error = "institutionId required" });
 
         var states = await _features.GetStatesAsync(instId, agentId);
         return Ok(states);
@@ -567,19 +588,8 @@ public class FeaturesController : ScopedController
     public async Task<IActionResult> Set([FromBody] SetFeatureFlagRequest req)
     {
         var c = Caller();
-        if (c.Role == "Viewer") return Forbid();
-
-        // Authorisation: InstitutionAdmin may only touch their own institution / its agents
-        if (c.Role == "InstitutionAdmin")
-        {
-            if (req.Scope == "Institution" && req.ScopeId != c.InstitutionId)
-                return Forbid();
-            if (req.Scope == "Agent")
-            {
-                var a = await _agents.GetAgentByIdAsync(req.ScopeId, c.Scope);
-                if (a == null) return Forbid();
-            }
-        }
+        // Feature management is SuperAdmin-only.
+        if (!c.IsSuperAdmin) return Forbid();
 
         try { await _features.SetAsync(req, c.Actor); }
         catch (ArgumentException ex) { return BadRequest(new { error = ex.Message }); }
@@ -587,7 +597,52 @@ public class FeaturesController : ScopedController
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "feature.set",
             $"{req.FeatureKey}@{req.Scope}:{req.ScopeId}",
             req.Enabled?.ToString() ?? "cleared", c.Ip);
+
+        // For Application Control, push the resolved policy to affected live agents now
+        // so the change takes effect without waiting for a reconnect.
+        if (req.FeatureKey == FeatureCatalog.AppInstall)
+            await RepushAppControlAsync(req);
+
         return Ok();
+    }
+
+    private async Task RepushAppControlAsync(SetFeatureFlagRequest req)
+    {
+        try
+        {
+            // Determine which agents are affected
+            List<AgentEntity> agents;
+            if (req.Scope == "Agent")
+            {
+                var a = await _agents.GetAgentByIdAsync(req.ScopeId, null);
+                agents = a != null ? new List<AgentEntity> { a } : new();
+            }
+            else // Institution scope → all its agents
+            {
+                agents = await _agents.GetAgentsAsync(req.ScopeId);
+            }
+
+            foreach (var a in agents)
+            {
+                var conn = _connections.GetConnectionId(a.Id);
+                if (conn == null) continue; // offline; will get it on next connect
+
+                var enabled = await _features.IsEnabledAsync(FeatureCatalog.AppInstall, a.Id);
+                AppControlPolicy policy;
+                if (enabled)
+                {
+                    var json = await _features.GetConfigAsync(FeatureCatalog.AppInstall, a.Id);
+                    policy = string.IsNullOrWhiteSpace(json)
+                        ? new AppControlPolicy { Enabled = true }
+                        : System.Text.Json.JsonSerializer.Deserialize<AppControlPolicy>(json) ?? new AppControlPolicy { Enabled = true };
+                    policy.Enabled = true;
+                }
+                else policy = new AppControlPolicy { Enabled = false };
+
+                await _hub.Clients.Client(conn).SendAsync("ApplyAppControlPolicy", policy);
+            }
+        }
+        catch { /* best-effort live push; agents reconcile on reconnect anyway */ }
     }
 }
 
