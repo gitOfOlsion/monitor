@@ -48,23 +48,32 @@ else
                 <div class="pm-gauges">
                     @Gauge("CPU", m.CpuPercent, "#3b82f6")
                     @Gauge("RAM", m.RamPercent, "#10b981")
-                    @Gauge("DISK", m.DiskPercent, "#f59e0b")
+                    @Gauge("DISK", m.DiskActivePercent, "#f59e0b")
+                    @NetGauge(m.NetworkKbps)
                 </div>
 
                 <div class="pm-metric-specs">
                     @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
                     @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
-                    @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo</div> }
+                    @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo@(m.DiskPercent.HasValue ? $" · {m.DiskPercent:F0}% full" : "")</div> }
                 </div>
 
                 <div class="pm-sparklines">
                     <div class="pm-spark-row">
                         <span class="pm-spark-label">CPU</span>
-                        @Sparkline(m.CpuHistory, "#3b82f6")
+                        @Sparkline(m.CpuHistory, "#3b82f6", "%")
                     </div>
                     <div class="pm-spark-row">
                         <span class="pm-spark-label">RAM</span>
-                        @Sparkline(m.RamHistory, "#10b981")
+                        @Sparkline(m.RamHistory, "#10b981", "%")
+                    </div>
+                    <div class="pm-spark-row">
+                        <span class="pm-spark-label">DISK</span>
+                        @Sparkline(m.DiskHistory, "#f59e0b", "%")
+                    </div>
+                    <div class="pm-spark-row">
+                        <span class="pm-spark-label">NET</span>
+                        @Sparkline(m.NetHistory, "#8b5cf6", "kb")
                     </div>
                 </div>
             </div>
@@ -101,6 +110,32 @@ else
         catch { /* keep last good data */ }
     }
 
+    // ── Network gauge: shows throughput value (auto KB/MB), not a percentage ──
+    private RenderFragment NetGauge(double? kbps) => builder =>
+    {
+        const int size = 72, cx = 36, cy = 36, r = 30, stroke = 7;
+        var color = "#8b5cf6";
+        // Scale ring against a soft 10 MB/s reference so it animates without a hard max
+        var refKbps = 10_240.0;
+        var v = kbps ?? 0;
+        var frac = Math.Min(1.0, v / refKbps);
+        var circ = 2 * Math.PI * r;
+        var filled = circ * frac;
+        var gap = circ - filled;
+        string display = !kbps.HasValue ? "—"
+            : v >= 1024 ? $"{v / 1024.0:F1}M" : $"{v:F0}K";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append($"<div class=\"pm-gauge\"><svg viewBox=\"0 0 {size} {size}\">");
+        sb.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"none\" stroke=\"var(--border)\" stroke-width=\"{stroke}\"/>");
+        sb.Append($"<circle cx=\"{cx}\" cy=\"{cy}\" r=\"{r}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"{stroke}\" " +
+                  $"stroke-dasharray=\"{filled:F2} {gap:F2}\" stroke-dashoffset=\"{circ / 4:F2}\" stroke-linecap=\"round\" " +
+                  $"transform=\"rotate(-90 {cx} {cy})\"/>");
+        sb.Append($"<text x=\"{cx}\" y=\"{cy + 4}\" text-anchor=\"middle\" font-size=\"13\" font-weight=\"700\" fill=\"var(--text)\">{display}</text>");
+        sb.Append($"</svg><div class=\"pm-gauge-label\">NET/s</div></div>");
+        builder.AddMarkupContent(0, sb.ToString());
+    };
+
     // ── Circular gauge ───────────────────────────────────────────────────
     private RenderFragment Gauge(string label, double? pct, string color) => builder =>
     {
@@ -109,7 +144,6 @@ else
         var circ = 2 * Math.PI * r;
         var filled = circ * (v / 100.0);
         var gap = circ - filled;
-        // Color shifts to amber/red as utilisation climbs
         var c = v >= 90 ? "#ef4444" : v >= 75 ? "#f59e0b" : color;
         var display = pct.HasValue ? $"{v:F0}%" : "—";
 
@@ -125,7 +159,7 @@ else
     };
 
     // ── Sparkline ─────────────────────────────────────────────────────────
-    private RenderFragment Sparkline(List<double> data, string color) => builder =>
+    private RenderFragment Sparkline(List<double> data, string color, string unit = "%") => builder =>
     {
         if (data == null || data.Count < 2)
         {
@@ -133,19 +167,24 @@ else
             return;
         }
         const int w = 200, h = 30;
-        var max = Math.Max(1.0, data.Max());
+        // For percentages use a fixed 100 scale; for network auto-scale to the window max.
+        var max = unit == "%" ? 100.0 : Math.Max(1.0, data.Max());
         var step = (double)w / (data.Count - 1);
         var pts = new System.Text.StringBuilder();
         for (int i = 0; i < data.Count; i++)
         {
             var x = i * step;
-            var y = h - (data[i] / max) * (h - 4) - 2;
+            var y = h - (Math.Min(data[i], max) / max) * (h - 4) - 2;
             pts.Append($"{x:F1},{y:F1} ");
         }
+        var last = data[^1];
+        string label = unit == "%" ? $"{last:F0}%"
+            : last >= 1024 ? $"{last / 1024.0:F1}M" : $"{last:F0}K";
+
         var sb = new System.Text.StringBuilder();
         sb.Append($"<svg class=\"pm-spark\" viewBox=\"0 0 {w} {h}\" preserveAspectRatio=\"none\">");
         sb.Append($"<polyline points=\"{pts}\" fill=\"none\" stroke=\"{color}\" stroke-width=\"1.5\"/>");
-        sb.Append($"<text x=\"{w - 2}\" y=\"10\" text-anchor=\"end\" font-size=\"9\" fill=\"var(--text-muted)\">{data[^1]:F0}%</text>");
+        sb.Append($"<text x=\"{w - 2}\" y=\"10\" text-anchor=\"end\" font-size=\"9\" fill=\"var(--text-muted)\">{label}</text>");
         sb.Append("</svg>");
         builder.AddMarkupContent(0, sb.ToString());
     };

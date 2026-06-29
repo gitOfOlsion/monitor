@@ -127,14 +127,52 @@ public class UserService
         return (true, null);
     }
 
+    public async Task<(bool ok, string? error)> UpdateUserAsync(
+        string id, string? email, string? newPassword, string callerRole, Guid? callerInstitutionId)
+    {
+        var user = await _userMgr.FindByIdAsync(id);
+        if (user == null) return (false, "User not found");
+
+        // Institution admins can only edit users within their own institution
+        if (callerRole == "InstitutionAdmin" && user.InstitutionId != callerInstitutionId)
+            return (false, "Cannot edit users outside your institution");
+        // Nobody edits a SuperAdmin via this API
+        if (user.Role == "SuperAdmin" && callerRole != "SuperAdmin")
+            return (false, "Cannot edit a SuperAdmin");
+
+        if (!string.IsNullOrWhiteSpace(email) && email != user.Email)
+        {
+            user.Email = email;
+            var upd = await _userMgr.UpdateAsync(user);
+            if (!upd.Succeeded)
+                return (false, string.Join("; ", upd.Errors.Select(e => e.Description)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(newPassword))
+        {
+            var token = await _userMgr.GeneratePasswordResetTokenAsync(user);
+            var res = await _userMgr.ResetPasswordAsync(user, token, newPassword);
+            if (!res.Succeeded)
+                return (false, string.Join("; ", res.Errors.Select(e => e.Description)));
+        }
+
+        _log.LogInformation("User updated: {User}", user.UserName);
+        return (true, null);
+    }
+
     public async Task<(bool ok, string? error)> DeleteUserAsync(
-        string id, string callerRole, Guid? callerInstitutionId)
+        string id, string callerRole, Guid? callerInstitutionId, string? callerActor = null)
     {
         var user = await _userMgr.FindByIdAsync(id);
         if (user == null) return (false, "User not found");
 
         // Never delete SuperAdmin
         if (user.Role == "SuperAdmin") return (false, "Cannot delete SuperAdmin");
+
+        // An admin cannot delete their own account
+        if (!string.IsNullOrEmpty(callerActor) &&
+            string.Equals(user.UserName, callerActor, StringComparison.OrdinalIgnoreCase))
+            return (false, "You cannot delete your own account");
 
         // Institution admins can only delete users in their own institution
         if (callerRole == "InstitutionAdmin" && user.InstitutionId != callerInstitutionId)

@@ -27,8 +27,10 @@ public record HeartbeatPayload(
     string?       DiskInfo     = null,
     double?       CpuPercent   = null,   // live CPU utilisation 0-100
     double?       RamPercent   = null,   // live RAM used 0-100
-    double?       DiskPercent  = null,   // live system-disk used 0-100
-    long?         RamUsedMb    = null    // live RAM used in MB (for display)
+    double?       DiskPercent  = null,   // system-disk SPACE used 0-100
+    long?         RamUsedMb    = null,   // live RAM used in MB (for display)
+    double?       DiskActivePercent = null, // live disk ACTIVITY 0-100 (Task Manager "Disk %")
+    double?       NetworkKbps  = null    // live network throughput in KB/s (all adapters)
 );
 
 public record DeviceChangedPayload(
@@ -157,12 +159,16 @@ public class AgentMetricsDto
     // Latest live values
     public double?  CpuPercent   { get; set; }
     public double?  RamPercent   { get; set; }
-    public double?  DiskPercent  { get; set; }
+    public double?  DiskPercent  { get; set; }   // disk space used
     public long?    RamUsedMb    { get; set; }
+    public double?  DiskActivePercent { get; set; } // disk activity (Task Manager "Disk %")
+    public double?  NetworkKbps  { get; set; }   // network throughput KB/s
     public DateTime? LastHeartbeat { get; set; }
     // Sparkline history (oldest → newest), ~last 60 samples
     public List<double> CpuHistory { get; set; } = [];
     public List<double> RamHistory { get; set; } = [];
+    public List<double> DiskHistory { get; set; } = [];
+    public List<double> NetHistory { get; set; } = [];
 }
 
 public class DeviceEventDto
@@ -213,6 +219,11 @@ public record CreateUserRequest(
     string  Password,
     string  Role,            // InstitutionAdmin | Viewer (SuperAdmin only via seed)
     Guid?   InstitutionId
+);
+
+public record UpdateUserRequest(
+    string?  Email,
+    string?  Password         // null/empty = leave unchanged
 );
 
 // ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────
