@@ -146,6 +146,27 @@ public class FileShareService
         }
     }
 
+    public FileDeleteResult DeleteFile(FileDeleteRequest req)
+    {
+        if (!TryResolvePath(req.FileName, out var path, out var err))
+            return new FileDeleteResult(req.CommandId, false, err);
+
+        try
+        {
+            if (!File.Exists(path))
+                return new FileDeleteResult(req.CommandId, false, "File not found");
+
+            File.Delete(path);
+            _log.LogInformation("Deleted shared file: {Path}", path);
+            return new FileDeleteResult(req.CommandId, true, $"Deleted {req.FileName}");
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Failed to delete file {Name}", req.FileName);
+            return new FileDeleteResult(req.CommandId, false, ex.Message);
+        }
+    }
+
     public SharedFolderListing ListFiles(string commandId)
     {
         try

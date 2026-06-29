@@ -177,6 +177,15 @@ public class ServerApiClient
         return (await r.Content.ReadAsByteArrayAsync(), null);
     }
 
+    public async Task<(bool ok, string? error)> DeleteSharedFileAsync(Guid agentId, string fileName)
+    {
+        AttachIdentity();
+        var r = await _http.DeleteAsync($"/api/agents/{agentId}/files?fileName={Uri.EscapeDataString(fileName)}");
+        if (r.IsSuccessStatusCode) return (true, null);
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, err?.Error ?? "Delete failed");
+    }
+
     // ── Remote desktop (Guacamole) ───────────────────────────────────────────
     public async Task<(bool ok, string? url, string? protocol, string? error)> GetRemoteDesktopUrlAsync(Guid agentId)
     {

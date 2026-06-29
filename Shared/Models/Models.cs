@@ -90,6 +90,17 @@ public record FilePullResult(
     string? Base64Content
 );
 
+public record FileDeleteRequest(
+    string CommandId,
+    string FileName       // name only — must exist in the shared folder
+);
+
+public record FileDeleteResult(
+    string  CommandId,
+    bool    Success,
+    string? Message
+);
+
 public record SharedFileInfo(
     string   Name,
     long     SizeBytes,

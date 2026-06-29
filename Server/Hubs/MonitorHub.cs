@@ -65,6 +65,14 @@ public class MonitorHub : Hub
         return Task.CompletedTask;
     }
 
+    /// <summary>Agent reports the result of a file delete.</summary>
+    public Task FileDeleteResult(FileDeleteResult result)
+    {
+        _log.LogInformation("File delete result {Id}: success={Success} {Msg}", result.CommandId, result.Success, result.Message);
+        _connections.CompleteResult(result.CommandId, result);
+        return Task.CompletedTask;
+    }
+
     /// <summary>Agent reports the contents of its shared folder.</summary>
     public Task SharedFolderListing(SharedFolderListing listing)
     {
