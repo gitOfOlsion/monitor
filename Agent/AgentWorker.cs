@@ -241,34 +241,36 @@ public class AgentWorker : BackgroundService
     }
 
     // ── Live utilisation sampling ────────────────────────────────────────
-    private (double? cpu, double? ramPct, double? diskPct, long? ramUsedMb) GetLiveMetrics()
+    private (double? cpu, double? ramPct, double? diskPct, long? ramUsedMb, double? diskActive, double? netKbps) GetLiveMetrics()
     {
-        double? cpu = null, ramPct = null, diskPct = null;
+        double? cpu = null, ramPct = null, diskPct = null, diskActive = null, netKbps = null;
         long? ramUsedMb = null;
         try
         {
-            // CPU: aggregate process time delta across all cores. For a system-wide
-            // figure we use the OS performance data where available.
             if (OperatingSystem.IsWindows())
             {
-                var (c, rAvail, rTotal) = WindowsLiveMetrics();
-                cpu = c;
-                if (rTotal > 0)
+                var m = WindowsLiveMetrics();
+                cpu = m.cpu;
+                diskActive = m.diskActive;
+                netKbps = m.netKbps;
+                if (m.ramTotal > 0)
                 {
-                    var used = rTotal - rAvail;
+                    var used = m.ramTotal - m.ramAvail;
                     ramUsedMb = used / (1024 * 1024);
-                    ramPct = 100.0 * used / rTotal;
+                    ramPct = 100.0 * used / m.ramTotal;
                 }
             }
             else
             {
-                var (c, rUsedMb, rTotalMb) = LinuxLiveMetrics();
-                cpu = c;
-                ramUsedMb = rUsedMb;
-                ramPct = rTotalMb > 0 ? 100.0 * rUsedMb / rTotalMb : null;
+                var m = LinuxLiveMetrics();
+                cpu = m.cpu;
+                ramUsedMb = m.ramUsedMb;
+                ramPct = m.ramTotalMb > 0 ? 100.0 * m.ramUsedMb / m.ramTotalMb : null;
+                diskActive = m.diskActive;
+                netKbps = m.netKbps;
             }
 
-            // Disk: system drive used %
+            // Disk SPACE used % (system drive)
             var sysRoot = OperatingSystem.IsWindows()
                 ? Path.GetPathRoot(Environment.GetFolderPath(Environment.SpecialFolder.System)) ?? "C:\\"
                 : "/";
@@ -277,58 +279,93 @@ public class AgentWorker : BackgroundService
                 diskPct = 100.0 * (di.TotalSize - di.AvailableFreeSpace) / di.TotalSize;
         }
         catch { /* non-fatal */ }
-        return (cpu.HasValue ? Math.Round(cpu.Value, 1) : null,
-                ramPct.HasValue ? Math.Round(ramPct.Value, 1) : null,
-                diskPct.HasValue ? Math.Round(diskPct.Value, 1) : null,
-                ramUsedMb);
+
+        return (Round(cpu), Round(ramPct), Round(diskPct), ramUsedMb, Round(diskActive), Round(netKbps));
     }
 
-    // Returns (cpuPercent, ramAvailableBytes, ramTotalBytes)
-    private (double? cpu, long ramAvail, long ramTotal) WindowsLiveMetrics()
+    private static double? Round(double? v) => v.HasValue ? Math.Round(v.Value, 1) : null;
+
+    // Returns accurate Task-Manager-equivalent metrics via WMI formatted perf data.
+    private (double? cpu, long ramAvail, long ramTotal, double? diskActive, double? netKbps) WindowsLiveMetrics()
     {
-        double? cpu = null;
+        double? cpu = null, diskActive = null, netKbps = null;
         long ramAvail = 0, ramTotal = 0;
         try
         {
             var scope = new System.Management.ManagementScope(@"\\.\root\cimv2");
             scope.Connect();
 
-            // CPU load via Win32_Processor.LoadPercentage (instantaneous, no sampling needed)
+            // CPU: Win32_PerfFormattedData_PerfOS_Processor _Total instance gives the
+            // same averaged "% Processor Time" Task Manager shows — far more accurate
+            // than Win32_Processor.LoadPercentage (a coarse instantaneous snapshot).
             using (var q = new System.Management.ManagementObjectSearcher(scope,
-                new System.Management.ObjectQuery("SELECT LoadPercentage FROM Win32_Processor")))
+                new System.Management.ObjectQuery(
+                    "SELECT PercentProcessorTime FROM Win32_PerfFormattedData_PerfOS_Processor WHERE Name='_Total'")))
             {
-                double sum = 0; int n = 0;
                 foreach (System.Management.ManagementObject o in q.Get())
                 {
-                    if (o["LoadPercentage"] != null) { sum += Convert.ToDouble(o["LoadPercentage"]); n++; }
+                    cpu = Convert.ToDouble(o["PercentProcessorTime"]);
+                    break;
                 }
+            }
+            // Fallback if perf class unavailable
+            if (cpu == null)
+            {
+                using var q2 = new System.Management.ManagementObjectSearcher(scope,
+                    new System.Management.ObjectQuery("SELECT LoadPercentage FROM Win32_Processor"));
+                double sum = 0; int n = 0;
+                foreach (System.Management.ManagementObject o in q2.Get())
+                    if (o["LoadPercentage"] != null) { sum += Convert.ToDouble(o["LoadPercentage"]); n++; }
                 if (n > 0) cpu = sum / n;
             }
 
-            // RAM via Win32_OperatingSystem (values in KB)
+            // RAM (KB → bytes)
             using (var q = new System.Management.ManagementObjectSearcher(scope,
                 new System.Management.ObjectQuery("SELECT FreePhysicalMemory, TotalVisibleMemorySize FROM Win32_OperatingSystem")))
             {
                 foreach (System.Management.ManagementObject o in q.Get())
                 {
-                    ramAvail = Convert.ToInt64(o["FreePhysicalMemory"]) * 1024;       // KB → bytes
+                    ramAvail = Convert.ToInt64(o["FreePhysicalMemory"]) * 1024;
                     ramTotal = Convert.ToInt64(o["TotalVisibleMemorySize"]) * 1024;
                     break;
                 }
             }
+
+            // Disk activity %: _Total instance of PercentDiskTime (Task Manager "Disk %").
+            // Can exceed 100 on busy multi-disk systems, so clamp.
+            using (var q = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery(
+                    "SELECT PercentDiskTime FROM Win32_PerfFormattedData_PerfDisk_PhysicalDisk WHERE Name='_Total'")))
+            {
+                foreach (System.Management.ManagementObject o in q.Get())
+                {
+                    diskActive = Math.Min(100.0, Convert.ToDouble(o["PercentDiskTime"]));
+                    break;
+                }
+            }
+
+            // Network: sum BytesTotalPerSec across all non-loopback interfaces → KB/s
+            using (var q = new System.Management.ManagementObjectSearcher(scope,
+                new System.Management.ObjectQuery(
+                    "SELECT BytesTotalPerSec FROM Win32_PerfFormattedData_Tcpip_NetworkInterface")))
+            {
+                double totalBytes = 0;
+                foreach (System.Management.ManagementObject o in q.Get())
+                    if (o["BytesTotalPerSec"] != null) totalBytes += Convert.ToDouble(o["BytesTotalPerSec"]);
+                netKbps = totalBytes / 1024.0;
+            }
         }
         catch { /* non-fatal */ }
-        return (cpu, ramAvail, ramTotal);
+        return (cpu, ramAvail, ramTotal, diskActive, netKbps);
     }
 
-    // Returns (cpuPercent, ramUsedMb, ramTotalMb)
-    private (double? cpu, long ramUsedMb, long ramTotalMb) LinuxLiveMetrics()
+    // Linux live metrics including disk activity and network throughput
+    private (double? cpu, long ramUsedMb, long ramTotalMb, double? diskActive, double? netKbps) LinuxLiveMetrics()
     {
-        double? cpu = null;
+        double? cpu = null, diskActive = null, netKbps = null;
         long ramUsedMb = 0, ramTotalMb = 0;
         try
         {
-            // RAM from /proc/meminfo
             if (File.Exists("/proc/meminfo"))
             {
                 long total = 0, avail = 0;
@@ -342,11 +379,46 @@ public class AgentWorker : BackgroundService
                 ramUsedMb  = (total - avail) / 1024;
             }
 
-            // CPU from two /proc/stat samples 200ms apart
             cpu = SampleLinuxCpu();
+            netKbps = SampleLinuxNet();
+            // Disk activity on Linux requires parsing /proc/diskstats deltas; left null
+            // for now (the GUI shows "—"). Could be added if Linux agents need it.
         }
         catch { /* non-fatal */ }
-        return (cpu, ramUsedMb, ramTotalMb);
+        return (cpu, ramUsedMb, ramTotalMb, diskActive, netKbps);
+    }
+
+    // Sample network throughput from /proc/net/dev over a short interval (KB/s)
+    private static double? SampleLinuxNet()
+    {
+        try
+        {
+            long Read()
+            {
+                long total = 0;
+                foreach (var line in File.ReadLines("/proc/net/dev"))
+                {
+                    var idx = line.IndexOf(':');
+                    if (idx < 0) continue;
+                    var iface = line[..idx].Trim();
+                    if (iface == "lo") continue;
+                    var parts = line[(idx + 1)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (parts.Length >= 9)
+                    {
+                        long.TryParse(parts[0], out var rx);  // bytes received
+                        long.TryParse(parts[8], out var tx);  // bytes transmitted
+                        total += rx + tx;
+                    }
+                }
+                return total;
+            }
+            var b1 = Read();
+            System.Threading.Thread.Sleep(200);
+            var b2 = Read();
+            var bytesPerSec = (b2 - b1) * 5.0; // 200ms → ×5 for per-second
+            return bytesPerSec / 1024.0;       // KB/s
+        }
+        catch { return null; }
     }
 
     private static long ParseMeminfoKb(string line)
@@ -424,13 +496,14 @@ public class AgentWorker : BackgroundService
                     var snap = await _monitor.GetSnapshotAsync();
                     var loggedInUser = GetLoggedInUser();
                     var (cpu, cores, ramMb, disk) = GetHardwareInfo();
-                    var (cpuPct, ramPct, diskPct, ramUsedMb) = GetLiveMetrics();
-                    _log.LogInformation("Heartbeat — {N} devices, User={User}, CPU%={Cpu} RAM%={Ram}",
-                        snap.Count, loggedInUser ?? "none", cpuPct?.ToString() ?? "?", ramPct?.ToString() ?? "?");
+                    var (cpuPct, ramPct, diskPct, ramUsedMb, diskActive, netKbps) = GetLiveMetrics();
+                    _log.LogInformation("Heartbeat — {N} devices, User={User}, CPU%={Cpu} RAM%={Ram} Disk%={Disk} Net={Net}KB/s",
+                        snap.Count, loggedInUser ?? "none", cpuPct?.ToString() ?? "?", ramPct?.ToString() ?? "?",
+                        diskActive?.ToString() ?? "?", netKbps?.ToString("F0") ?? "?");
                     await _hub.SendAsync("AgentHeartbeat",
                         new HeartbeatPayload(_machineName, _macAddress, _institutionId, _platform.ToString(),
                             DateTime.UtcNow, snap.Count, loggedInUser, cpu, cores, ramMb, disk,
-                            cpuPct, ramPct, diskPct, ramUsedMb), ct);
+                            cpuPct, ramPct, diskPct, ramUsedMb, diskActive, netKbps), ct);
                     await FlushPendingEventsAsync();
                 }
                 else if (_hub?.State == HubConnectionState.Disconnected)

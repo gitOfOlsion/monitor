@@ -53,6 +53,29 @@
     </div>
 }
 
+@if (_editUser != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseEdit">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>Edit User — @_editUser.UserName</h2>
+
+            @if (_editError != null)
+            { <div class="pm-alert pm-alert-error">@_editError</div> }
+
+            <div class="pm-field"><label>Email</label>
+                <input class="pm-input" @bind="_editEmail" type="email" placeholder="user@institution.edu" /></div>
+            <div class="pm-field"><label>New Password</label>
+                <input class="pm-input" @bind="_editPass" type="password" placeholder="leave blank to keep current" /></div>
+            <p class="pm-hint" style="margin:.25rem 0 0 0">Leave the password blank to keep the existing one. Username and role can't be changed here.</p>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseEdit">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="SaveEditAsync">Save changes</button>
+            </div>
+        </div>
+    </div>
+}
+
 @if (_loading)
 { <div class="pm-loading">Loading…</div> }
 else
@@ -74,7 +97,10 @@ else
                             <td><span class="pm-badge pm-badge-@u.Role.ToLower()">@u.Role</span></td>
                             <td>@Fmt(u.CreatedAt, "yyyy-MM-dd")</td>
                             <td class="pm-actions">
-                                @if (u.Role != "SuperAdmin")
+                                <button class="pm-btn pm-btn-secondary pm-btn-sm"
+                                        @onclick="() => OpenEdit(u)">✏️ Edit</button>
+                                @if (u.Role != "SuperAdmin" &&
+                                     !string.Equals(u.UserName, _currentUser, StringComparison.OrdinalIgnoreCase))
                                 {
                                     <button class="pm-btn pm-btn-danger pm-btn-sm"
                                             @onclick="() => DeleteAsync(u.Id)">🗑 Delete</button>
@@ -98,8 +124,40 @@ else
     private bool   _loading = true, _showCreate, _isSuperAdmin, _msgError;
     private string _uName = "", _uEmail = "", _uPass = "", _uRole = "Viewer", _uInstitution = "";
     private string? _error, _message;
+    private string  _currentUser = "";
     private TimeSpan _tzOffset = TimeSpan.Zero;
     private bool _tzFetched;
+
+    // Edit modal state
+    private UserDto? _editUser;
+    private string _editEmail = "", _editPass = "";
+    private string? _editError;
+
+    private void OpenEdit(UserDto u)
+    {
+        _editUser  = u;
+        _editEmail = u.Email ?? "";
+        _editPass  = "";
+        _editError = null;
+    }
+
+    private void CloseEdit() { _editUser = null; _editError = null; }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editUser == null) return;
+        _editError = null;
+        var (ok, error) = await Api.UpdateUserAsync(_editUser.Id,
+            new UpdateUserRequest(string.IsNullOrWhiteSpace(_editEmail) ? null : _editEmail,
+                                  string.IsNullOrWhiteSpace(_editPass) ? null : _editPass));
+        if (ok)
+        {
+            CloseEdit();
+            Toast("User updated.", false);
+            await LoadAsync();
+        }
+        else { _editError = error; }
+    }
 
     private string Fmt(DateTime utc, string format = "yyyy-MM-dd HH:mm:ss")
         => utc.Add(_tzOffset).ToString(format);
@@ -123,6 +181,7 @@ else
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
+        _currentUser  = auth.User.Identity?.Name ?? "";
         if (_isSuperAdmin)
             _institutions = await Api.GetInstitutionsAsync() ?? [];
         await LoadAsync();

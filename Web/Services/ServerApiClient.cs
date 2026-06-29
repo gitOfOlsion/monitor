@@ -103,6 +103,15 @@ public class ServerApiClient
         return (false, body?.Error ?? "Failed to create user");
     }
 
+    public async Task<(bool ok, string? error)> UpdateUserAsync(string id, UpdateUserRequest req)
+    {
+        AttachIdentity();
+        var r = await _http.PutAsJsonAsync($"/api/users/{id}", req);
+        if (r.IsSuccessStatusCode) return (true, null);
+        var body = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, body?.Error ?? "Failed to update user");
+    }
+
     public async Task<(bool ok, string? error)> DeleteUserAsync(string id)
     {
         AttachIdentity();

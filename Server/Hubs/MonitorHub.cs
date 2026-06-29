@@ -26,7 +26,8 @@ public class MonitorHub : Hub
         if (agentId != Guid.Empty)
         {
             _connections.Register(agentId, Context.ConnectionId);
-            _metrics.Record(agentId, p.CpuPercent, p.RamPercent, p.DiskPercent, p.RamUsedMb);
+            _metrics.Record(agentId, p.CpuPercent, p.RamPercent, p.DiskPercent, p.RamUsedMb,
+                            p.DiskActivePercent, p.NetworkKbps);
         }
 
         await Clients.Group(InstGroup(p.InstitutionId)).SendAsync("OnAgentHeartbeat", p);

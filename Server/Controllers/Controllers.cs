@@ -61,7 +61,7 @@ public class AgentsController : ScopedController
         var agents = await _svc.GetAgentsAsync(Caller().Scope);
         var result = agents.Where(a => a.Status == "Approved").Select(a =>
         {
-            var (cpu, ram, disk, ramUsedMb, cpuHist, ramHist) = _metrics.Get(a.Id);
+            var (cpu, ram, disk, ramUsedMb, diskActive, netKbps, cpuHist, ramHist, diskHist, netHist) = _metrics.Get(a.Id);
             return new AgentMetricsDto
             {
                 AgentId = a.Id, MachineName = a.MachineName, Platform = a.Platform,
@@ -69,8 +69,9 @@ public class AgentsController : ScopedController
                 CpuName = a.CpuName, CpuCores = a.CpuCores, RamMb = a.RamMb,
                 DiskInfo = a.DiskInfo, LoggedInUser = a.LoggedInUser,
                 CpuPercent = cpu, RamPercent = ram, DiskPercent = disk, RamUsedMb = ramUsedMb,
+                DiskActivePercent = diskActive, NetworkKbps = netKbps,
                 LastHeartbeat = a.LastHeartbeat,
-                CpuHistory = cpuHist, RamHistory = ramHist
+                CpuHistory = cpuHist, RamHistory = ramHist, DiskHistory = diskHist, NetHistory = netHist
             };
         }).ToList();
         return Ok(result);
@@ -415,12 +416,24 @@ public class UsersController : ScopedController
         return Ok();
     }
 
+    [HttpPut("{id}")]
+    public async Task<IActionResult> Update(string id, [FromBody] UpdateUserRequest req)
+    {
+        var c = Caller();
+        if (c.Role != "SuperAdmin" && c.Role != "InstitutionAdmin") return Forbid();
+        var (ok, error) = await _users.UpdateUserAsync(id, req.Email, req.Password, c.Role, c.InstitutionId);
+        if (!ok) return BadRequest(new { error });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "user.update", id,
+            req.Password != null ? "password+email" : "email", c.Ip);
+        return Ok();
+    }
+
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(string id)
     {
         var c = Caller();
         if (c.Role != "SuperAdmin" && c.Role != "InstitutionAdmin") return Forbid();
-        var (ok, error) = await _users.DeleteUserAsync(id, c.Role, c.InstitutionId);
+        var (ok, error) = await _users.DeleteUserAsync(id, c.Role, c.InstitutionId, c.Actor);
         if (!ok) return BadRequest(new { error });
         await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "user.delete", id, null, c.Ip);
         return Ok();
