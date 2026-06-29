@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using PeripheralMonitor.Server.Hubs;
 using PeripheralMonitor.Server.Services;
+using PeripheralMonitor.Server.Data;
 using PeripheralMonitor.Shared.Models;
 using System.Text;
 using System.Text.Json;
