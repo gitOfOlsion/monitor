@@ -1,9 +1,15 @@
-# Development: listens on :80 (HTTP)
-# Production:  replace :80 with your domain (e.g. monitor.yourdomain.com)
-#              Caddy will auto-provision TLS via Let's Encrypt
-:80 {
+# Production Caddyfile for monitorhubs.net
+# Caddy auto-provisions TLS via Let's Encrypt on port 443
+# Ports 80 and 443 must be open on your firewall
 
-    # Blazor Server dashboard (default)
+# Redirect www → apex
+www.monitorhubs.net {
+    redir https://monitorhubs.net{uri} permanent
+}
+
+monitorhubs.net {
+
+    # Blazor Server dashboard (default — everything not matched below)
     @web {
         not path /api/* /monitor /monitor/* /health /seq/* /remote /remote/*
     }
@@ -16,9 +22,14 @@
         reverse_proxy server:5000
     }
 
-    # SignalR hub (agents + web dashboard)
+    # SignalR hub — agents + web dashboard (WebSocket upgrade required)
     handle /monitor* {
-        reverse_proxy server:5000
+        reverse_proxy server:5000 {
+            header_up Upgrade    {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+            header_up Host       {host}
+            header_up X-Real-IP  {remote_host}
+        }
     }
 
     handle /health {
@@ -26,9 +37,6 @@
     }
 
     # Guacamole remote desktop gateway
-    # Guacamole's WAR deploys at the /guacamole context path (not root).
-    # handle_path strips the matched "/remote" prefix automatically, leaving just
-    # the remainder (e.g. "/" or "/app.js"), which we then prepend "/guacamole" to.
     handle /remote {
         redir /remote/ 308
     }
