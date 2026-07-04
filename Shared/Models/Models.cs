@@ -363,10 +363,13 @@ public record SetFeatureFlagRequest(
 public class AppControlPolicy
 {
     public bool         Enabled           { get; set; }            // master switch (mirrors the feature flag)
-    public List<string> BlockedExtensions { get; set; } = new() { ".exe", ".msi" };  // e.g. games/installers
+    // Defaults are EMPTY: enabling the feature blocks nothing until an admin
+    // explicitly configures rules. This ensures removing an item from the policy
+    // truly stops blocking it (no hidden built-in defaults to fall back on).
+    public List<string> BlockedExtensions { get; set; } = new();    // e.g. ".exe", ".msi"
     public List<string> BlockedNamePatterns { get; set; } = new();  // substrings, e.g. "steam", "epicgames"
     public List<string> AllowedNamePatterns { get; set; } = new();  // carve-outs that override a block
-    public bool         BlockInstallers   { get; set; } = true;      // also block msiexec / *setup* / *install*
+    public bool         BlockInstallers   { get; set; } = false;     // opt-in only
 }
 
 // Kept for backward compatibility with any stored config; superseded by AppControlPolicy.

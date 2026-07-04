@@ -154,11 +154,11 @@ else
     private string? _msg; private bool _msgOk;
     private Guid? _myInstitution;
 
-    // App-control policy editor state
-    private string _cfgBlockedExt = ".exe, .msi";
+    // App-control policy editor state (empty by default — block nothing until configured)
+    private string _cfgBlockedExt = "";
     private string _cfgBlockedNames = "";
     private string _cfgAllowedNames = "";
-    private bool   _cfgBlockInstallers = true;
+    private bool   _cfgBlockInstallers = false;
 
     protected override async Task OnInitializedAsync()
     {
