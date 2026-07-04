@@ -1,9 +1,21 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
 @inject ServerApiClient Api
+@implements IDisposable
 
 <div class="pm-layout">
-    <nav class="pm-sidebar">
+    <!-- Mobile top bar with hamburger (hidden on desktop via CSS) -->
+    <div class="pm-mobile-bar">
+        <button class="pm-hamburger" @onclick="ToggleSidebar" aria-label="Menu">☰</button>
+        <span class="pm-mobile-title"><span>📡</span> Peripheral Monitor</span>
+    </div>
+
+    @if (_sidebarOpen)
+    {
+        <div class="pm-sidebar-backdrop" @onclick="CloseSidebar"></div>
+    }
+
+    <nav class="pm-sidebar @(_sidebarOpen ? "pm-sidebar-open" : "")">
         <div class="pm-logo">
             <span class="pm-logo-icon">📡</span>
             <span class="pm-logo-text">Peripheral Monitor</span>
@@ -13,7 +25,7 @@
             <Authorized Context="auth">
                 <ul class="pm-nav">
                     <li>
-                        <NavLink href="/" Match="NavLinkMatch.All">
+                        <NavLink href="/dashboard" Match="NavLinkMatch.All">
                             <span class="pm-nav-icon">🏠</span> Dashboard
                         </NavLink>
                     </li>
@@ -106,6 +118,23 @@
 
 @code {
     private bool _reportsEnabled;
+    private bool _sidebarOpen;
+
+    private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
+    private void CloseSidebar()  => _sidebarOpen = false;
+
+    protected override void OnInitialized()
+    {
+        // Close the mobile drawer whenever the route changes
+        Nav.LocationChanged += OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        if (_sidebarOpen) { _sidebarOpen = false; InvokeAsync(StateHasChanged); }
+    }
+
+    public void Dispose() => Nav.LocationChanged -= OnLocationChanged;
 
     protected override async Task OnInitializedAsync()
     {

@@ -160,6 +160,8 @@ public class AgentMetricsDto
 {
     public Guid     AgentId      { get; set; }
     public string   MachineName  { get; set; } = "";
+    public Guid     InstitutionId   { get; set; }
+    public string   InstitutionName { get; set; } = "";
     public string   Platform     { get; set; } = "Unknown";
     public bool     Online       { get; set; }
     public string?  CpuName      { get; set; }
