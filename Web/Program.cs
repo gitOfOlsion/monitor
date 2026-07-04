@@ -19,8 +19,29 @@ try
     builder.Services.AddControllers();
     builder.Services.AddHttpContextAccessor();
 
+    // Behind the Caddy reverse proxy, TLS is terminated at Caddy and requests reach
+    // this container over HTTP. Honour X-Forwarded-Proto/-For so the app knows the
+    // original request was HTTPS (correct scheme for redirects + Secure cookies).
+    builder.Services.Configure<Microsoft.AspNetCore.HttpOverrides.ForwardedHeadersOptions>(o =>
+    {
+        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                           | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        // Only Caddy (on the internal Docker network) fronts this app; clear the
+        // default localhost-only restriction so the forwarded headers are honoured.
+        o.KnownNetworks.Clear();
+        o.KnownProxies.Clear();
+    });
+
     builder.Services.AddAuthentication("Cookies")
-        .AddCookie("Cookies", o => { o.LoginPath = "/login"; o.ExpireTimeSpan = TimeSpan.FromHours(8); });
+        .AddCookie("Cookies", o =>
+        {
+            o.LoginPath = "/login";
+            o.ExpireTimeSpan = TimeSpan.FromHours(8);
+            // Cookie is Secure whenever the request is HTTPS (always, in production
+            // behind Caddy), but still works over plain HTTP in local/dev.
+            o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+            o.Cookie.SameSite = SameSiteMode.Lax;
+        });
     builder.Services.AddAuthorization();
     builder.Services.AddCascadingAuthenticationState();
 
@@ -31,6 +52,8 @@ try
 
     var app = builder.Build();
 
+    // Must run before auth/redirect middleware so the correct scheme is applied.
+    app.UseForwardedHeaders();
     app.UseSerilogRequestLogging();
     app.UseStaticFiles();
     app.UseAuthentication();

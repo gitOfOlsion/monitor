@@ -93,6 +93,6 @@ public class AuthController : Controller
         catch { /* best effort */ }
 
         await HttpContext.SignOutAsync("Cookies");
-        return Redirect("/login");
+        return Redirect("/");
     }
 }
