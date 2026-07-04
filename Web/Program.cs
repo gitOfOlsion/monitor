@@ -1,4 +1,6 @@
 using PeripheralMonitor.Web.Services;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.HttpOverrides;
 using Serilog;
 using Serilog.Events;
 
@@ -22,10 +24,9 @@ try
     // Behind the Caddy reverse proxy, TLS is terminated at Caddy and requests reach
     // this container over HTTP. Honour X-Forwarded-Proto/-For so the app knows the
     // original request was HTTPS (correct scheme for redirects + Secure cookies).
-    builder.Services.Configure<Microsoft.AspNetCore.HttpOverrides.ForwardedHeadersOptions>(o =>
+    builder.Services.Configure<ForwardedHeadersOptions>(o =>
     {
-        o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
-                           | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto;
+        o.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
         // Only Caddy (on the internal Docker network) fronts this app; clear the
         // default localhost-only restriction so the forwarded headers are honoured.
         o.KnownNetworks.Clear();
