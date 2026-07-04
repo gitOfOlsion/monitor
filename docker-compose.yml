@@ -1,4 +1,4 @@
-#version: "3.9"
+version: "3.9"
 
 # ── Single version variable — matches Directory.Build.props DotNetVersion ──
 x-dotnet-version: &dotnet-version "10.0"
@@ -51,7 +51,7 @@ services:
       ConnectionStrings__Postgres:      "Host=db;Port=5432;Database=peripheral_monitor;Username=pm_user;Password=${DB_PASSWORD}"
       Jwt__Secret:                      ${JWT_SECRET}
       SuperAdminPassword:               ${SUPER_ADMIN_PASSWORD}
-      PublicUrl:                        ${PUBLIC_URL:-http://localhost}
+      PublicUrl:                        ${PUBLIC_URL:-https://monitorhubs.net}
       GuacamoleSecret:                  ${GUACAMOLE_SECRET}
       GuacamoleJsonKey:                 ${GUACAMOLE_JSON_KEY}
       Seq__Url:                         http://seq:5341
