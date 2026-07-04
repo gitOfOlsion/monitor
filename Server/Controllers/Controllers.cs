@@ -67,6 +67,8 @@ public class AgentsController : ScopedController
             return new AgentMetricsDto
             {
                 AgentId = a.Id, MachineName = a.MachineName, Platform = a.Platform,
+                InstitutionId = a.InstitutionId ?? Guid.Empty,
+                InstitutionName = a.Institution?.Name ?? "Unassigned",
                 Online = _connections.IsOnline(a.Id),
                 CpuName = a.CpuName, CpuCores = a.CpuCores, RamMb = a.RamMb,
                 DiskInfo = a.DiskInfo, LoggedInUser = a.LoggedInUser,

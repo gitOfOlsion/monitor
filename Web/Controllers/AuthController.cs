@@ -68,7 +68,7 @@ public class AuthController : Controller
             new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8) });
 
         _logger.LogInformation("Login: {User} ({Role})", result.UserName, result.Role);
-        var safe = string.IsNullOrEmpty(returnUrl) || !Url.IsLocalUrl(returnUrl) ? "/" : returnUrl;
+        var safe = string.IsNullOrEmpty(returnUrl) || !Url.IsLocalUrl(returnUrl) || returnUrl == "/" ? "/dashboard" : returnUrl;
         return LocalRedirect(safe);
     }
 

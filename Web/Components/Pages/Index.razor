@@ -1,0 +1,161 @@
+@page "/"
+@layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
+@using Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+@inject NavigationManager Nav
+
+<PageTitle>Peripheral Monitor — Centralised device visibility</PageTitle>
+
+<div class="pm-landing">
+
+    <!-- Top bar -->
+    <header class="pm-landing-nav">
+        <div class="pm-landing-brand">
+            <span class="pm-landing-logo">📡</span>
+            <span>Peripheral Monitor</span>
+        </div>
+        <a href="/login" class="pm-btn pm-btn-primary pm-btn-sm">Sign in →</a>
+    </header>
+
+    <!-- Hero -->
+    <section class="pm-hero">
+        <div class="pm-hero-inner">
+            <h1>Centralised device visibility<br/>across all your institutions</h1>
+            <p class="pm-hero-sub">
+                Real-time peripheral monitoring, live system metrics, browser-based remote desktop,
+                and application control — for every machine, in one dashboard.
+            </p>
+            <div class="pm-hero-cta">
+                <a href="/login" class="pm-btn pm-btn-light">Sign in to your dashboard →</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Services -->
+    <section class="pm-services">
+        <div class="pm-services-inner">
+            <h2>What it does</h2>
+            <p class="pm-services-intro">Select a capability to learn more.</p>
+
+            <div class="pm-service-grid">
+                @foreach (var s in _services)
+                {
+                    <button class="pm-service-card @(_selected == s.Key ? "pm-service-active" : "")"
+                            @onclick="() => Select(s.Key)">
+                        <span class="pm-service-icon">@s.Icon</span>
+                        <span class="pm-service-title">@s.Title</span>
+                    </button>
+                }
+            </div>
+
+            @if (_current != null)
+            {
+                <div class="pm-service-detail" @key="_current.Key">
+                    <div class="pm-service-detail-text">
+                        <h3>@_current.Icon @_current.Title</h3>
+                        <p>@_current.Description</p>
+                        <ul>
+                            @foreach (var p in _current.Points)
+                            { <li>@p</li> }
+                        </ul>
+                    </div>
+                    <div class="pm-service-detail-art">
+                        @((MarkupString)_current.Svg)
+                    </div>
+                </div>
+            }
+        </div>
+    </section>
+
+    <footer class="pm-landing-footer">
+        © @DateTime.UtcNow.Year Peripheral Monitor · All rights reserved
+    </footer>
+</div>
+
+@code {
+    private string _selected = "tracking";
+    private Service? _current => _services.FirstOrDefault(s => s.Key == _selected);
+
+    private void Select(string key) => _selected = key;
+
+    private record Service(string Key, string Icon, string Title, string Description, string[] Points, string Svg);
+
+    private readonly List<Service> _services = new()
+    {
+        new("tracking", "🖥️", "Real-time peripheral tracking",
+            "Track USB, keyboard, mouse, audio, HID, Bluetooth, storage and display devices the moment they connect or disconnect — with a durable event history that survives restarts.",
+            new[] { "USB, input, audio, storage and more", "Instant connect / disconnect events", "Durable history that survives reconnects" },
+            SvgTracking),
+        new("metrics", "📊", "Live system metrics",
+            "See per-device CPU, memory, disk activity and network throughput in real time, sampled from the same performance counters Task Manager uses.",
+            new[] { "CPU · RAM · Disk · Network", "Live gauges and sparklines", "Task-Manager-accurate sampling" },
+            SvgMetrics),
+        new("remote", "🔑", "Web-based remote desktop",
+            "Open a full remote desktop session in the browser — no client to install. Works even for machines behind NAT, thanks to a secure reverse tunnel.",
+            new[] { "Clientless RDP in the browser", "Works behind NAT / firewalls", "No inbound ports required" },
+            SvgRemote),
+        new("tenant", "🌐", "Multi-institution & multi-tenant",
+            "Each institution admin sees only their own devices; super admins see everything. Roles keep every tenant's data cleanly separated.",
+            new[] { "Institution-scoped access", "SuperAdmin / Admin / Viewer roles", "Clean tenant isolation" },
+            SvgTenant),
+        new("control", "🛡️", "Application control",
+            "Block the file types and applications you don't want running on managed machines — stop games or unapproved software from launching, enforced on the device.",
+            new[] { "Block-list by extension or name", "Allowed-pattern exceptions", "Enforced on the device" },
+            SvgControl),
+        new("reports", "📄", "Reports & audit",
+            "Filter device events by institution, device, date, category or user, then print or save to PDF. Every admin action is recorded in the audit log.",
+            new[] { "Filter by date / device / user", "Print or save to PDF", "Full administrative audit trail" },
+            SvgReports),
+    };
+
+    // ── Inline SVG illustrations (dependency-free, theme-blue) ──────────────
+    private const string SvgTracking = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <rect x="30" y="30" width="180" height="100" rx="8" fill="#e8f0fb" stroke="#185FA5" stroke-width="2"/>
+          <rect x="45" y="46" width="150" height="12" rx="3" fill="#1D9E75"/>
+          <circle cx="60" cy="90" r="10" fill="#185FA5"/><circle cx="95" cy="90" r="10" fill="#33a0d6"/>
+          <circle cx="130" cy="90" r="10" fill="#1D9E75"/><circle cx="165" cy="90" r="10" fill="#f5a623"/>
+          <rect x="52" y="112" width="136" height="6" rx="3" fill="#cfe0f3"/>
+        </svg>
+        """;
+    private const string SvgMetrics = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <polyline points="20,120 50,90 80,100 110,60 140,80 170,40 210,70" fill="none" stroke="#185FA5" stroke-width="3"/>
+          <polyline points="20,140 50,120 80,130 110,110 140,120 170,95 210,110" fill="none" stroke="#1D9E75" stroke-width="3"/>
+          <circle cx="200" cy="45" r="26" fill="none" stroke="#e8f0fb" stroke-width="7"/>
+          <circle cx="200" cy="45" r="26" fill="none" stroke="#f5a623" stroke-width="7" stroke-dasharray="120 60" transform="rotate(-90 200 45)"/>
+        </svg>
+        """;
+    private const string SvgRemote = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <rect x="24" y="34" width="90" height="64" rx="6" fill="#e8f0fb" stroke="#185FA5" stroke-width="2"/>
+          <rect x="128" y="52" width="88" height="60" rx="6" fill="#dff3ea" stroke="#1D9E75" stroke-width="2"/>
+          <path d="M116 66 h20 M132 60 l8 6 -8 6" stroke="#f5a623" stroke-width="3" fill="none"/>
+          <rect x="52" y="104" width="34" height="6" rx="3" fill="#185FA5"/>
+        </svg>
+        """;
+    private const string SvgTenant = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="120" cy="80" r="30" fill="#185FA5"/>
+          <circle cx="54" cy="52" r="16" fill="#1D9E75"/><circle cx="186" cy="52" r="16" fill="#33a0d6"/>
+          <circle cx="54" cy="112" r="16" fill="#f5a623"/><circle cx="186" cy="112" r="16" fill="#8b5cf6"/>
+          <path d="M120 80 L54 52 M120 80 L186 52 M120 80 L54 112 M120 80 L186 112" stroke="#cfe0f3" stroke-width="2"/>
+        </svg>
+        """;
+    private const string SvgControl = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <path d="M120 28 L172 46 V88 C172 116 148 130 120 138 C92 130 68 116 68 88 V46 Z" fill="#e8f0fb" stroke="#185FA5" stroke-width="2"/>
+          <path d="M104 84 l12 12 22 -26" fill="none" stroke="#1D9E75" stroke-width="5" stroke-linecap="round"/>
+        </svg>
+        """;
+    private const string SvgReports = """
+        <svg viewBox="0 0 240 160" xmlns="http://www.w3.org/2000/svg">
+          <rect x="70" y="26" width="100" height="118" rx="6" fill="#fff" stroke="#185FA5" stroke-width="2"/>
+          <rect x="84" y="44" width="72" height="8" rx="2" fill="#1D9E75"/>
+          <rect x="84" y="62" width="72" height="5" rx="2" fill="#cfe0f3"/>
+          <rect x="84" y="74" width="72" height="5" rx="2" fill="#cfe0f3"/>
+          <rect x="84" y="86" width="50" height="5" rx="2" fill="#cfe0f3"/>
+          <rect x="84" y="104" width="20" height="24" fill="#33a0d6"/><rect x="110" y="112" width="20" height="16" fill="#185FA5"/><rect x="136" y="98" width="20" height="30" fill="#1D9E75"/>
+        </svg>
+        """;
+}

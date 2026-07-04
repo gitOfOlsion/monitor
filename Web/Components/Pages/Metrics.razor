@@ -29,56 +29,65 @@ else if (Filtered.Count == 0)
 }
 else
 {
-    <div class="pm-metrics-grid">
-        @foreach (var m in Filtered)
-        {
-            <div class="pm-metric-card @(m.Online ? "" : "pm-metric-offline")">
-                <div class="pm-metric-head">
-                    <div>
-                        <div class="pm-metric-machine">@m.MachineName</div>
-                        <div class="pm-metric-sub">
-                            @(m.Platform) · @(m.LoggedInUser ?? "no user")
+    @foreach (var group in Grouped)
+    {
+        <div class="pm-metric-inst-group">
+            <div class="pm-metric-inst-header">
+                <span class="pm-metric-inst-name">🏢 @group.Key</span>
+                <span class="pm-metric-inst-count">@group.Count() device@(group.Count() == 1 ? "" : "s") · @group.Count(d => d.Online) online</span>
+            </div>
+            <div class="pm-metrics-grid">
+                @foreach (var m in group)
+                {
+                    <div class="pm-metric-card @(m.Online ? "" : "pm-metric-offline")">
+                        <div class="pm-metric-head">
+                            <div>
+                                <div class="pm-metric-machine">@m.MachineName</div>
+                                <div class="pm-metric-sub">
+                                    @(m.Platform) · @(m.LoggedInUser ?? "no user")
+                                </div>
+                            </div>
+                            <span class="pm-metric-status @(m.Online ? "on" : "off")">
+                                @(m.Online ? "ONLINE" : "OFFLINE")
+                            </span>
+                        </div>
+
+                        <div class="pm-gauges">
+                            @Gauge("CPU", m.CpuPercent, "#3b82f6")
+                            @Gauge("RAM", m.RamPercent, "#10b981")
+                            @Gauge("DISK", m.DiskActivePercent, "#f59e0b")
+                            @NetGauge(m.NetworkKbps)
+                        </div>
+
+                        <div class="pm-metric-specs">
+                            @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
+                            @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
+                            @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo@(m.DiskPercent.HasValue ? $" · {m.DiskPercent:F0}% full" : "")</div> }
+                        </div>
+
+                        <div class="pm-sparklines">
+                            <div class="pm-spark-row">
+                                <span class="pm-spark-label">CPU</span>
+                                @Sparkline(m.CpuHistory, "#3b82f6", "%")
+                            </div>
+                            <div class="pm-spark-row">
+                                <span class="pm-spark-label">RAM</span>
+                                @Sparkline(m.RamHistory, "#10b981", "%")
+                            </div>
+                            <div class="pm-spark-row">
+                                <span class="pm-spark-label">DISK</span>
+                                @Sparkline(m.DiskHistory, "#f59e0b", "%")
+                            </div>
+                            <div class="pm-spark-row">
+                                <span class="pm-spark-label">NET</span>
+                                @Sparkline(m.NetHistory, "#8b5cf6", "kb")
+                            </div>
                         </div>
                     </div>
-                    <span class="pm-metric-status @(m.Online ? "on" : "off")">
-                        @(m.Online ? "ONLINE" : "OFFLINE")
-                    </span>
-                </div>
-
-                <div class="pm-gauges">
-                    @Gauge("CPU", m.CpuPercent, "#3b82f6")
-                    @Gauge("RAM", m.RamPercent, "#10b981")
-                    @Gauge("DISK", m.DiskActivePercent, "#f59e0b")
-                    @NetGauge(m.NetworkKbps)
-                </div>
-
-                <div class="pm-metric-specs">
-                    @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
-                    @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
-                    @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo@(m.DiskPercent.HasValue ? $" · {m.DiskPercent:F0}% full" : "")</div> }
-                </div>
-
-                <div class="pm-sparklines">
-                    <div class="pm-spark-row">
-                        <span class="pm-spark-label">CPU</span>
-                        @Sparkline(m.CpuHistory, "#3b82f6", "%")
-                    </div>
-                    <div class="pm-spark-row">
-                        <span class="pm-spark-label">RAM</span>
-                        @Sparkline(m.RamHistory, "#10b981", "%")
-                    </div>
-                    <div class="pm-spark-row">
-                        <span class="pm-spark-label">DISK</span>
-                        @Sparkline(m.DiskHistory, "#f59e0b", "%")
-                    </div>
-                    <div class="pm-spark-row">
-                        <span class="pm-spark-label">NET</span>
-                        @Sparkline(m.NetHistory, "#8b5cf6", "kb")
-                    </div>
-                </div>
+                }
             </div>
-        }
-    </div>
+        </div>
+    }
 }
 
 @code {
@@ -91,6 +100,11 @@ else
         _metrics.Where(m => string.IsNullOrWhiteSpace(_filter) ||
                             m.MachineName.Contains(_filter, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(m => m.Online).ThenBy(m => m.MachineName).ToList();
+
+    // Group the filtered devices by institution for the sectioned view.
+    private IEnumerable<IGrouping<string, AgentMetricsDto>> Grouped =>
+        Filtered.GroupBy(m => string.IsNullOrEmpty(m.InstitutionName) ? "Unassigned" : m.InstitutionName)
+                .OrderBy(g => g.Key);
 
     protected override async Task OnInitializedAsync()
     {
