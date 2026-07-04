@@ -1,14 +1,31 @@
-# Development: listens on :80 (HTTP)
-# Production:  replace :80 with your domain (e.g. monitor.yourdomain.com)
-#              Caddy will auto-provision TLS via Let's Encrypt
-:80 {
+# ─────────────────────────────────────────────────────────────────────────
+# Production configuration for monitorhubs.net
+#
+# When a domain (not :80) is specified, Caddy automatically:
+#   • provisions and renews a TLS certificate via Let's Encrypt
+#   • redirects ALL http:// traffic to https:// (HTTP→HTTPS 308 redirect)
+# Requirements: DNS A/AAAA record for monitorhubs.net → this host,
+#               and ports 80 + 443 reachable from the internet.
+# For local/dev use, replace the domain line with ":80".
+# ─────────────────────────────────────────────────────────────────────────
 
-    # Blazor Server dashboard (default)
+# Redirect the www subdomain to the bare apex domain (over HTTPS)
+www.monitorhubs.net {
+    redir https://monitorhubs.net{uri} permanent
+}
+
+monitorhubs.net {
+
+    # Blazor Server dashboard (default) — everything not matched below
     @web {
         not path /api/* /monitor /monitor/* /health /seq/* /remote /remote/*
     }
     handle @web {
-        reverse_proxy web:5001
+        reverse_proxy web:5001 {
+            # Preserve WebSocket upgrades for Blazor Server's SignalR circuit
+            header_up Upgrade    {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+        }
     }
 
     # Server REST API
@@ -16,9 +33,12 @@
         reverse_proxy server:5000
     }
 
-    # SignalR hub (agents + web dashboard)
+    # SignalR hub (agents + web dashboard) — needs explicit WebSocket upgrade headers
     handle /monitor* {
-        reverse_proxy server:5000
+        reverse_proxy server:5000 {
+            header_up Upgrade    {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+        }
     }
 
     handle /health {
@@ -27,14 +47,17 @@
 
     # Guacamole remote desktop gateway
     # Guacamole's WAR deploys at the /guacamole context path (not root).
-    # handle_path strips the matched "/remote" prefix automatically, leaving just
-    # the remainder (e.g. "/" or "/app.js"), which we then prepend "/guacamole" to.
+    # handle_path strips the matched "/remote" prefix, and we prepend "/guacamole".
     handle /remote {
         redir /remote/ 308
     }
     handle_path /remote/* {
         rewrite * /guacamole{uri}
-        reverse_proxy guacamole:8080
+        reverse_proxy guacamole:8080 {
+            # Guacamole uses WebSockets for the remote-desktop tunnel
+            header_up Upgrade    {http.request.header.Upgrade}
+            header_up Connection {http.request.header.Connection}
+        }
     }
 
     # Seq log viewer
