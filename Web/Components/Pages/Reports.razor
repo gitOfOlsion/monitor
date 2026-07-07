@@ -74,6 +74,11 @@
     </div>
 </div>
 
+@if (_error != null)
+{
+    <div class="pm-alert pm-alert-error pm-no-print" style="margin-bottom:1rem">@_error</div>
+}
+
 @if (_result != null)
 {
     <div class="pm-report-actions pm-no-print">
@@ -178,26 +183,44 @@
         _agents = inst.HasValue ? all.Where(a => a.InstitutionId == inst.Value).ToList() : all;
     }
 
+    private string? _error;
+
     private async Task GenerateAsync()
     {
+        _error = null;
         _loading = true;
-        Guid? inst = _isSuperAdmin ? (Guid.TryParse(_institution, out var gi) ? gi : null) : _myInstitution;
-        List<Guid>? agentIds = Guid.TryParse(_agent, out var ga) ? new List<Guid> { ga } : null;
+        StateHasChanged();
+        try
+        {
+            Guid? inst = _isSuperAdmin ? (Guid.TryParse(_institution, out var gi) ? gi : null) : _myInstitution;
+            List<Guid>? agentIds = Guid.TryParse(_agent, out var ga) ? new List<Guid> { ga } : null;
 
-        // Convert local date filters to UTC bounds
-        DateTime? fromUtc = _fromDate.HasValue ? DateTime.SpecifyKind(_fromDate.Value, DateTimeKind.Utc).Subtract(_tzOffset) : null;
-        DateTime? toUtc   = _toDate.HasValue   ? DateTime.SpecifyKind(_toDate.Value.AddDays(1), DateTimeKind.Utc).Subtract(_tzOffset) : null;
+            // Convert local date filters to UTC bounds
+            DateTime? fromUtc = _fromDate.HasValue ? DateTime.SpecifyKind(_fromDate.Value, DateTimeKind.Utc).Subtract(_tzOffset) : null;
+            DateTime? toUtc   = _toDate.HasValue   ? DateTime.SpecifyKind(_toDate.Value.AddDays(1), DateTimeKind.Utc).Subtract(_tzOffset) : null;
 
-        var req = new ReportRequest(inst, agentIds, fromUtc, toUtc,
-            string.IsNullOrEmpty(_category) ? null : _category,
-            string.IsNullOrEmpty(_eventType) ? null : _eventType,
-            null,
-            null,
-            string.IsNullOrEmpty(_user) ? null : _user);
+            var req = new ReportRequest(inst, agentIds, fromUtc, toUtc,
+                string.IsNullOrEmpty(_category) ? null : _category,
+                string.IsNullOrEmpty(_eventType) ? null : _eventType,
+                null,
+                null,
+                string.IsNullOrEmpty(_user) ? null : _user);
 
-        _result = await Api.GenerateReportAsync(req);
-        _summaryLine = BuildSummary();
-        _loading = false;
+            _result = await Api.GenerateReportAsync(req);
+            if (_result == null)
+                _error = "Could not generate the report. Please check your filters and try again.";
+            else
+                _summaryLine = BuildSummary();
+        }
+        catch (Exception ex)
+        {
+            _error = "Report generation failed: " + ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
     }
 
     private string BuildSummary()
