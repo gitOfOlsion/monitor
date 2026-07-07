@@ -606,6 +606,23 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
   .pm-table-fixed { table-layout: auto; }
   .pm-table-fixed td { overflow: visible; text-overflow: clip; white-space: normal; }
 
+  /* Override inline table-layout:fixed (e.g. Audit) and truncation so cells
+     wrap and show full content in the stacked card layout instead of clipping. */
+  .pm-table[style*="table-layout"] { table-layout: auto !important; }
+  .pm-truncate {
+    overflow: visible !important; text-overflow: clip !important;
+    white-space: normal !important; word-break: break-word;
+    text-align: right; max-width: 60vw;
+  }
+
+  /* Live Event Feed (Dashboard): rows are flex spans, not a table — stack them
+     into wrapping cards so nothing overflows the viewport width. */
+  .pm-event-row { flex-wrap: wrap; align-items: flex-start; gap: .3rem .6rem; }
+  .pm-event-time     { white-space: nowrap; }
+  .pm-event-machine  { white-space: normal; word-break: break-word; }
+  .pm-event-name     { flex: 1 1 100%; }        /* description on its own line */
+  .pm-event-category { flex: 0 0 auto; }
+
   /* Grids collapse to one column on small screens */
   .pm-analytics-grid { grid-template-columns: 1fr !important; }
   .pm-metrics-grid { grid-template-columns: 1fr !important; }
@@ -618,6 +635,15 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
   .pm-feature-card { flex-wrap: wrap; }
 
   .pm-page-header { flex-direction: column; align-items: flex-start; gap: .6rem; }
+
+  /* Report filters + actions stack full-width so every control (incl. the
+     Generate button) is easy to tap and nothing is cut off. */
+  .pm-report-filters { flex-direction: column; align-items: stretch; gap: .75rem; }
+  .pm-report-filters .pm-field { width: 100%; }
+  .pm-report-filters .pm-input,
+  .pm-report-filters .pm-btn { width: 100%; }
+  .pm-report-actions { flex-direction: column; align-items: stretch; gap: .6rem; }
+  .pm-report-actions .pm-btn { width: 100%; }
 }
 
 /* Keep the sidebar always visible on desktop regardless of toggle state */
