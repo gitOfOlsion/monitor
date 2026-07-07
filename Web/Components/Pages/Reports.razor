@@ -111,13 +111,13 @@
                     @foreach (var r in _result.Rows)
                     {
                         <tr>
-                            <td class="pm-mono">@Fmt(r.Timestamp)</td>
-                            <td>@r.MachineName</td>
-                            <td>@(r.LoggedInUser ?? "—")</td>
-                            <td>@r.EventType</td>
-                            <td>@r.FriendlyName</td>
-                            <td>@r.Category</td>
-                            <td>@r.Status</td>
+                            <td data-label="Time" class="pm-mono">@Fmt(r.Timestamp)</td>
+                            <td data-label="Machine">@r.MachineName</td>
+                            <td data-label="User">@(r.LoggedInUser ?? "—")</td>
+                            <td data-label="Event">@r.EventType</td>
+                            <td data-label="Detail">@r.FriendlyName</td>
+                            <td data-label="Category">@r.Category</td>
+                            <td data-label="Status">@r.Status</td>
                         </tr>
                     }
                 </tbody>

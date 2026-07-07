@@ -40,12 +40,12 @@ else
                 @foreach (var l in Filtered)
                 {
                     <tr>
-                        <td class="pm-mono">@Fmt(l.Timestamp)</td>
-                        <td><strong>@l.Actor</strong></td>
-                        <td><span class="pm-badge pm-badge-@l.ActorRole.ToLower()">@l.ActorRole</span></td>
-                        <td><code>@l.Action</code></td>
-                        <td class="pm-truncate" title="@l.Target">@l.Target</td>
-                        <td class="pm-truncate" title="@l.Details">@(l.Details ?? "—")</td>
+                        <td data-label="Time" class="pm-mono">@Fmt(l.Timestamp)</td>
+                        <td data-label="Actor"><strong>@l.Actor</strong></td>
+                        <td data-label="Role"><span class="pm-badge pm-badge-@l.ActorRole.ToLower()">@l.ActorRole</span></td>
+                        <td data-label="Action"><code>@l.Action</code></td>
+                        <td data-label="Target" class="pm-truncate" title="@l.Target">@l.Target</td>
+                        <td data-label="Details" class="pm-truncate" title="@l.Details">@(l.Details ?? "—")</td>
                     </tr>
                 }
             </tbody>
