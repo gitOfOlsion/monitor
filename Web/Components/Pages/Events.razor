@@ -117,12 +117,12 @@ else
                                     @foreach (var e in rows)
                                     {
                                         <tr>
-                                            <td class="pm-mono">@Fmt(e.Timestamp)</td>
-                                            <td>@e.MachineName</td>
-                                            <td><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
-                                            <td>@e.FriendlyName</td>
-                                            <td>@e.Category</td>
-                                            <td>@e.Status</td>
+                                            <td data-label="Time" class="pm-mono">@Fmt(e.Timestamp)</td>
+                                            <td data-label="Machine">@e.MachineName</td>
+                                            <td data-label="Event"><span class="pm-badge pm-badge-@e.EventType.ToLower()">@e.EventType</span></td>
+                                            <td data-label="Detail">@e.FriendlyName</td>
+                                            <td data-label="Category">@e.Category</td>
+                                            <td data-label="Status">@e.Status</td>
                                         </tr>
                                     }
                                 }

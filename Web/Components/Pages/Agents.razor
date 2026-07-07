@@ -35,16 +35,16 @@ else
                     @foreach (var a in group)
                     {
                         <tr>
-                            <td>
+                            <td data-label="Machine">
                                 <a class="pm-machine-link" href="/events?machine=@Uri.EscapeDataString(a.MachineName)"
                                    title="View events for @a.MachineName">
                                     <strong>@a.MachineName</strong>
                                 </a>
                                 <div style="font-size:11px;color:var(--text-muted)">@a.MacAddress</div>
                             </td>
-                            <td>@Icon(a.Platform) @a.Platform</td>
-                            <td class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
-                            <td style="font-size:12px">
+                            <td data-label="Platform">@Icon(a.Platform) @a.Platform</td>
+                            <td data-label="Logged In" class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
+                            <td data-label="CPU" style="font-size:12px">
                                 @if (a.CpuName != null)
                                 {
                                     <span title="@a.CpuName">@ShortCpu(a.CpuName)</span>
@@ -52,11 +52,11 @@ else
                                 }
                                 else { <span style="color:var(--text-muted)">—</span> }
                             </td>
-                            <td style="font-size:12px">@(a.RamMb.HasValue ? $"{a.RamMb/1024} GB" : "—")</td>
-                            <td style="font-size:12px">@(a.DiskInfo ?? "—")</td>
-                            <td><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
-                            <td>@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
-                            <td>@a.DeviceCount</td>
+                            <td data-label="RAM" style="font-size:12px">@(a.RamMb.HasValue ? $"{a.RamMb/1024} GB" : "—")</td>
+                            <td data-label="Disk" style="font-size:12px">@(a.DiskInfo ?? "—")</td>
+                            <td data-label="Status"><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
+                            <td data-label="Last Heartbeat">@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
+                            <td data-label="Devices">@a.DeviceCount</td>
                             <td class="pm-actions">
                                 @if (a.Status == "Pending")
                                 {
@@ -182,9 +182,9 @@ else
                             @foreach (var f in _filesList)
                             {
                                 <tr>
-                                    <td>@f.Name</td>
-                                    <td>@FormatSize(f.SizeBytes)</td>
-                                    <td>@Fmt(f.ModifiedAt)</td>
+                                    <td data-label="Name">@f.Name</td>
+                                    <td data-label="Size">@FormatSize(f.SizeBytes)</td>
+                                    <td data-label="Modified">@Fmt(f.ModifiedAt)</td>
                                     <td class="pm-actions">
                                         <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => DownloadFileAsync(f.Name)" disabled="@_filesDownloading">
                                             ⬇ Download

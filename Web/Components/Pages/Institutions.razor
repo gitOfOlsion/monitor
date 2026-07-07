@@ -137,11 +137,11 @@ else
                 @foreach (var i in _institutions)
                 {
                     <tr>
-                        <td><strong>@i.Name</strong></td>
-                        <td><code>@i.Slug</code></td>
-                        <td>@i.Type</td>
-                        <td>@i.ContactEmail</td>
-                        <td>@Fmt(i.CreatedAt, "yyyy-MM-dd")</td>
+                        <td data-label="Name"><strong>@i.Name</strong></td>
+                        <td data-label="Slug"><code>@i.Slug</code></td>
+                        <td data-label="Type">@i.Type</td>
+                        <td data-label="Contact">@i.ContactEmail</td>
+                        <td data-label="Created">@Fmt(i.CreatedAt, "yyyy-MM-dd")</td>
                         <td class="pm-actions">
                             <button class="pm-btn pm-btn-primary pm-btn-sm"
                                     @onclick="() => ShowDownloads(i)">

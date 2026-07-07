@@ -29,6 +29,7 @@
 
 /* ── Reset ─────────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { max-width: 100%; overflow-x: hidden; }  /* never allow horizontal page scroll */
 body { font-family: "Anthropic Sans", system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.5; }
 a { color: var(--primary); text-decoration: none; }
 code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--surface2); padding: 1px 5px; border-radius: 4px; }
@@ -570,13 +571,50 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 
   .pm-main { padding: 1rem; height: auto; overflow: visible; }
 
-  /* Tables scroll horizontally rather than overflow the viewport */
-  .pm-table-wrapper { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .pm-table { min-width: 640px; }
+  /* ── Responsive tables → stacked cards (no horizontal scrolling) ──────
+     Each row becomes a card; each cell stacks with its column label shown
+     via the data-label attribute. Cells without a data-label (e.g. action
+     buttons) simply render full-width. */
+  .pm-table-wrapper { overflow-x: visible; box-shadow: none; border: none; background: transparent; }
+  .pm-table { min-width: 0; width: 100%; border-collapse: collapse; }
+  .pm-table thead { display: none; }                     /* hide the header row */
+  .pm-table tbody tr {
+    display: block; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: .75rem; padding: .35rem .2rem;
+    box-shadow: var(--shadow);
+  }
+  .pm-table tbody tr:hover { background: var(--surface); }
+  .pm-table td {
+    display: flex; justify-content: space-between; align-items: center; gap: 1rem;
+    padding: .5rem .9rem; border: none;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px; text-align: right; white-space: normal; word-break: break-word;
+  }
+  .pm-table td:last-child { border-bottom: none; }
+  /* Column label on the left of each stacked cell */
+  .pm-table td::before {
+    content: attr(data-label);
+    font-weight: 600; color: var(--text-muted); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .03em;
+    text-align: left; flex-shrink: 0; white-space: nowrap;
+  }
+  /* Cells with no label (action buttons, etc.) span the full width */
+  .pm-table td:not([data-label]) { justify-content: flex-start; text-align: left; }
+  .pm-table td:not([data-label])::before { content: none; }
+  .pm-table td.pm-actions { flex-wrap: wrap; justify-content: flex-start; gap: .4rem; }
+  .pm-table-fixed { table-layout: auto; }
+  .pm-table-fixed td { overflow: visible; text-overflow: clip; white-space: normal; }
 
   /* Grids collapse to one column on small screens */
   .pm-analytics-grid { grid-template-columns: 1fr !important; }
   .pm-metrics-grid { grid-template-columns: 1fr !important; }
+  .pm-metric-card { min-width: 0; }
+  /* Gauges wrap and shrink so all four fit a narrow card without overflow */
+  .pm-gauges { flex-wrap: wrap; gap: .75rem .25rem; }
+  .pm-gauge { flex: 1 1 22%; min-width: 64px; }
+  .pm-gauge svg { width: 64px; height: 64px; }
+  .pm-spark-row { font-size: 11px; }
   .pm-feature-card { flex-wrap: wrap; }
 
   .pm-page-header { flex-direction: column; align-items: flex-start; gap: .6rem; }

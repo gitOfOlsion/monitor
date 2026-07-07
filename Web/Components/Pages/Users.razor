@@ -92,10 +92,10 @@ else
                     @foreach (var u in group)
                     {
                         <tr>
-                            <td><strong>@u.UserName</strong></td>
-                            <td>@u.Email</td>
-                            <td><span class="pm-badge pm-badge-@u.Role.ToLower()">@u.Role</span></td>
-                            <td>@Fmt(u.CreatedAt, "yyyy-MM-dd")</td>
+                            <td data-label="Username"><strong>@u.UserName</strong></td>
+                            <td data-label="Email">@u.Email</td>
+                            <td data-label="Role"><span class="pm-badge pm-badge-@u.Role.ToLower()">@u.Role</span></td>
+                            <td data-label="Created">@Fmt(u.CreatedAt, "yyyy-MM-dd")</td>
                             <td class="pm-actions">
                                 <button class="pm-btn pm-btn-secondary pm-btn-sm"
                                         @onclick="() => OpenEdit(u)">✏️ Edit</button>
