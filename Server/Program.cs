@@ -110,6 +110,7 @@ try
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""CpuCores"" INTEGER;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""RamMb""    BIGINT;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""DiskInfo"" TEXT;
+            ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""Subgroup"" TEXT;
             ALTER TABLE ""device_events"" ADD COLUMN IF NOT EXISTS ""EventId"" UUID NOT NULL DEFAULT gen_random_uuid();
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_device_events_EventId"" ON ""device_events"" (""EventId"");
             CREATE TABLE IF NOT EXISTS ""feature_flags"" (

@@ -91,6 +91,51 @@ public class AgentService
         return a;
     }
 
+    /// <summary>
+    /// Set (or clear) a device's subgroup. To avoid fragmentation ("Lab1" vs "lab1"),
+    /// if an equivalent subgroup name already exists in the same institution (case /
+    /// whitespace-insensitive), the existing canonical spelling is reused.
+    /// </summary>
+    public async Task<(bool ok, string? error, string? applied)> SetSubgroupAsync(
+        Guid agentId, string? subgroup, Guid? callerInst)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var a = await db.Agents.FindAsync(agentId);
+        if (a == null) return (false, "Agent not found", null);
+        if (callerInst.HasValue && a.InstitutionId != callerInst.Value)
+            return (false, "Agent is out of your scope", null);
+
+        var trimmed = subgroup?.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            a.Subgroup = null; // clear → Ungrouped
+        }
+        else
+        {
+            // Reuse an existing equivalent name within the institution (dedup)
+            var existing = await db.Agents
+                .Where(x => x.InstitutionId == a.InstitutionId && x.Subgroup != null)
+                .Select(x => x.Subgroup!)
+                .Distinct()
+                .ToListAsync();
+            var match = existing.FirstOrDefault(e =>
+                string.Equals(e.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+            a.Subgroup = match ?? trimmed;
+        }
+
+        await db.SaveChangesAsync();
+        return (true, null, a.Subgroup);
+    }
+
+    /// <summary>Distinct subgroup names in an institution (for suggestions), sorted.</summary>
+    public async Task<List<string>> GetSubgroupsAsync(Guid? institutionId)
+    {
+        await using var db = await _db.CreateDbContextAsync();
+        var q = db.Agents.Where(a => a.Subgroup != null && a.Subgroup != "");
+        if (institutionId.HasValue) q = q.Where(a => a.InstitutionId == institutionId.Value);
+        return await q.Select(a => a.Subgroup!).Distinct().OrderBy(s => s).ToListAsync();
+    }
+
     public async Task<(Guid agentId, DeviceChangedPayload? loginEvent)> UpdateHeartbeatAsync(
         string machineName, string macAddress, string platform, Guid institutionId, DateTime ts, int count,
         string? loggedInUser = null, string? cpuName = null, int? cpuCores = null, long? ramMb = null, string? diskInfo = null)

@@ -147,6 +147,7 @@ public class AgentDto
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
     public string?   LoggedInUser  { get; set; }
+    public string?   Subgroup      { get; set; }
     public string?   CpuName       { get; set; }
     public int?      CpuCores      { get; set; }
     public long?     RamMb         { get; set; }
@@ -162,6 +163,7 @@ public class AgentMetricsDto
     public string   MachineName  { get; set; } = "";
     public Guid     InstitutionId   { get; set; }
     public string   InstitutionName { get; set; } = "";
+    public string?  Subgroup     { get; set; }
     public string   Platform     { get; set; } = "Unknown";
     public bool     Online       { get; set; }
     public string?  CpuName      { get; set; }
@@ -237,6 +239,10 @@ public record CreateUserRequest(
 public record UpdateUserRequest(
     string?  Email,
     string?  Password         // null/empty = leave unchanged
+);
+
+public record SetSubgroupRequest(
+    string?  Subgroup          // null/empty clears the subgroup (device becomes Ungrouped)
 );
 
 // ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────

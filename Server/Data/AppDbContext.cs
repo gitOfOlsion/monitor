@@ -64,6 +64,7 @@ public class AgentEntity
     public string?   ApprovedBy    { get; set; }
     public DateTime? ApprovedAt    { get; set; }
     public string?   LoggedInUser  { get; set; }  // current Windows/Linux user session
+    public string?   Subgroup      { get; set; }  // user-defined org label within institution (e.g. "Lab1")
     public string?   CpuName       { get; set; }  // e.g. "Intel Core i7-10700"
     public int?      CpuCores      { get; set; }  // logical processors
     public long?     RamMb         { get; set; }  // total RAM in MB
