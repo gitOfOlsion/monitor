@@ -206,9 +206,10 @@
                 null,
                 string.IsNullOrEmpty(_user) ? null : _user);
 
-            _result = await Api.GenerateReportAsync(req);
+            var (result, error) = await Api.GenerateReportAsync(req);
+            _result = result;
             if (_result == null)
-                _error = "Could not generate the report. Please check your filters and try again.";
+                _error = error ?? "Could not generate the report. Please check your filters and try again.";
             else
                 _summaryLine = BuildSummary();
         }

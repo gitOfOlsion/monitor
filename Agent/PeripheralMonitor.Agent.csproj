@@ -12,7 +12,6 @@
     <PackageReference Include="Serilog.Enrichers.Environment"                   Version="$(SerilogEnvVersion)" />
   </ItemGroup>
 
-
   <ItemGroup>
     <ProjectReference Include="..\Shared\PeripheralMonitor.Shared.csproj" />
   </ItemGroup>

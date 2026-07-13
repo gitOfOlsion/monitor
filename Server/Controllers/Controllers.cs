@@ -381,9 +381,10 @@ public class EventsController : ScopedController
         // Scope guard: non-superadmins are pinned to their own institution regardless of request.
         Guid? institutionId = c.IsSuperAdmin ? req.InstitutionId : c.InstitutionId;
 
-        // Reports is a managed feature. For an institution-scoped admin, enforce it.
-        // (SuperAdmin running an all-institutions report bypasses the per-institution gate.)
-        if (institutionId.HasValue &&
+        // The Reports feature toggle governs whether an INSTITUTION ADMIN may use
+        // reporting. SuperAdmin always has reporting access (they manage the toggle
+        // itself), so only enforce the gate for non-superadmins.
+        if (!c.IsSuperAdmin && institutionId.HasValue &&
             !await _features.IsEnabledForInstitutionAsync(FeatureCatalog.Reports, institutionId.Value))
             return BadRequest(new { error = "The Reports feature is disabled for this institution." });
 
