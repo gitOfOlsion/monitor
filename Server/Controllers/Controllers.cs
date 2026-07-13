@@ -56,6 +56,28 @@ public class AgentsController : ScopedController
     [HttpGet]
     public async Task<IActionResult> GetAll() => Ok(await _svc.GetAgentsAsync(Caller().Scope));
 
+    /// <summary>Distinct subgroup names in scope, for assignment suggestions.</summary>
+    [HttpGet("subgroups")]
+    public async Task<IActionResult> GetSubgroups()
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+        return Ok(await _svc.GetSubgroupsAsync(c.Scope));
+    }
+
+    /// <summary>Assign or clear a device's subgroup (SuperAdmin any; InstitutionAdmin own).</summary>
+    [HttpPut("{id:guid}/subgroup")]
+    public async Task<IActionResult> SetSubgroup(Guid id, [FromBody] SetSubgroupRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+        var (ok, error, applied) = await _svc.SetSubgroupAsync(id, req.Subgroup, c.Scope);
+        if (!ok) return BadRequest(new { error });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.subgroup",
+            id.ToString(), applied ?? "(cleared)", c.Ip);
+        return Ok(new { subgroup = applied });
+    }
+
     /// <summary>Live utilisation metrics + sparkline history for all in-scope agents.</summary>
     [HttpGet("metrics")]
     public async Task<IActionResult> GetMetrics()
@@ -71,7 +93,7 @@ public class AgentsController : ScopedController
                 InstitutionName = a.Institution?.Name ?? "Unassigned",
                 Online = _connections.IsOnline(a.Id),
                 CpuName = a.CpuName, CpuCores = a.CpuCores, RamMb = a.RamMb,
-                DiskInfo = a.DiskInfo, LoggedInUser = a.LoggedInUser,
+                DiskInfo = a.DiskInfo, LoggedInUser = a.LoggedInUser, Subgroup = a.Subgroup,
                 CpuPercent = cpu, RamPercent = ram, DiskPercent = disk, RamUsedMb = ramUsedMb,
                 DiskActivePercent = diskActive, NetworkKbps = netKbps,
                 LastHeartbeat = a.LastHeartbeat,

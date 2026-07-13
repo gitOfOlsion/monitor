@@ -21,71 +21,134 @@ else
     @if (_agents.Any(a => a.Status == "Pending"))
     { <div class="pm-alert pm-alert-warning">⚠️ @_agents.Count(a => a.Status == "Pending") agent(s) waiting for approval.</div> }
 
-    @foreach (var group in _agents.GroupBy(a => a.Institution?.Name ?? "Unassigned").OrderBy(g => g.Key))
+    @foreach (var inst in _agents.GroupBy(a => a.Institution?.Name ?? "Unassigned").OrderBy(g => g.Key))
     {
-        <h3 class="pm-group-header">@group.Key</h3>
-        <div class="pm-table-wrapper" style="margin-bottom:1.5rem">
-            <table class="pm-table">
-                <thead><tr>
-                    <th>Machine</th><th>Platform</th>
-                    <th>👤 Logged In</th><th>CPU</th><th>RAM</th><th>Disk</th>
-                    <th>Status</th><th>Last Heartbeat</th><th>Devices</th><th>Actions</th>
-                </tr></thead>
-                <tbody>
-                    @foreach (var a in group)
-                    {
-                        <tr>
-                            <td data-label="Machine">
-                                <a class="pm-machine-link" href="/events?machine=@Uri.EscapeDataString(a.MachineName)"
-                                   title="View events for @a.MachineName">
-                                    <strong>@a.MachineName</strong>
-                                </a>
-                                <div style="font-size:11px;color:var(--text-muted)">@a.MacAddress</div>
-                            </td>
-                            <td data-label="Platform">@Icon(a.Platform) @a.Platform</td>
-                            <td data-label="Logged In" class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
-                            <td data-label="CPU" style="font-size:12px">
-                                @if (a.CpuName != null)
-                                {
-                                    <span title="@a.CpuName">@ShortCpu(a.CpuName)</span>
-                                    @if (a.CpuCores.HasValue) { <span style="color:var(--text-muted)"> /@a.CpuCores</span> }
-                                }
-                                else { <span style="color:var(--text-muted)">—</span> }
-                            </td>
-                            <td data-label="RAM" style="font-size:12px">@(a.RamMb.HasValue ? $"{a.RamMb/1024} GB" : "—")</td>
-                            <td data-label="Disk" style="font-size:12px">@(a.DiskInfo ?? "—")</td>
-                            <td data-label="Status"><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
-                            <td data-label="Last Heartbeat">@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
-                            <td data-label="Devices">@a.DeviceCount</td>
-                            <td class="pm-actions">
-                                @if (a.Status == "Pending")
-                                {
-                                    <button class="pm-btn pm-btn-success pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">✓ Approve</button>
-                                    <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => RejectAsync(a.Id)">✗ Reject</button>
-                                }
-                                @if (a.Status == "Approved")
-                                {
-                                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">↻ Re-issue</button>
-                                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => OpenFiles(a)" title="Shared files">📁 Files</button>
-                                    @if (_canCommand)
-                                    {
-                                        <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via browser">🖥️ Remote Desktop</button>
-                                        <button class="pm-btn pm-btn-warning pm-btn-sm" @onclick="@(() => OpenCommand(a, "Restart"))" title="Restart machine">🔄 Restart</button>
-                                        <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="@(() => OpenCommand(a, "Shutdown"))" title="Shutdown machine">⏻ Shutdown</button>
-                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel">🛑 Cancel</button>
-                                    }
-                                }
-                                @if (a.Status != "Approved")
-                                { <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => DeleteAsync(a.Id)">🗑 Delete</button> }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
+        var instKey = inst.Key;
+        var instCollapsed = _collapsedInst.Contains(instKey);
+        <div class="pm-tree-inst">
+            <div class="pm-tree-inst-head" @onclick="() => ToggleInst(instKey)">
+                <span class="pm-tree-caret">@(instCollapsed ? "▶" : "▼")</span>
+                <span class="pm-tree-inst-name">🏛️ @instKey</span>
+                <span class="pm-tree-count">@inst.Count() device@(inst.Count() == 1 ? "" : "s")</span>
+            </div>
+
+            @if (!instCollapsed)
+            {
+                @foreach (var sub in inst.GroupBy(a => string.IsNullOrWhiteSpace(a.Subgroup) ? "Ungrouped" : a.Subgroup!)
+                                          .OrderBy(g => g.Key == "Ungrouped" ? "\uffff" : g.Key))
+                {
+                    var subKey = $"{instKey}／{sub.Key}";
+                    var subCollapsed = _collapsedSub.Contains(subKey);
+                    <div class="pm-tree-sub">
+                        <div class="pm-tree-sub-head" @onclick="() => ToggleSub(subKey)">
+                            <span class="pm-tree-caret">@(subCollapsed ? "▶" : "▼")</span>
+                            <span class="pm-tree-sub-name">@(sub.Key == "Ungrouped" ? "📂 Ungrouped" : $"🗂️ {sub.Key}")</span>
+                            <span class="pm-tree-count">@sub.Count()</span>
+                        </div>
+
+                        @if (!subCollapsed)
+                        {
+                            <div class="pm-table-wrapper">
+                                <table class="pm-table">
+                                    <thead><tr>
+                                        <th>Machine</th><th>Platform</th>
+                                        <th>👤 Logged In</th><th>CPU</th><th>RAM</th><th>Disk</th>
+                                        <th>Status</th><th>Last Heartbeat</th><th>Group</th><th>Actions</th>
+                                    </tr></thead>
+                                    <tbody>
+                                        @foreach (var a in sub)
+                                        {
+                                            <tr>
+                                                <td data-label="Machine">
+                                                    <a class="pm-machine-link" href="/events?machine=@Uri.EscapeDataString(a.MachineName)"
+                                                       title="View events for @a.MachineName">
+                                                        <strong>@a.MachineName</strong>
+                                                    </a>
+                                                    <div style="font-size:11px;color:var(--text-muted)">@a.MacAddress</div>
+                                                </td>
+                                                <td data-label="Platform">@Icon(a.Platform) @a.Platform</td>
+                                                <td data-label="Logged In" class="pm-mono" style="font-size:12px">@(a.LoggedInUser ?? "—")</td>
+                                                <td data-label="CPU" style="font-size:12px">
+                                                    @if (a.CpuName != null)
+                                                    {
+                                                        <span title="@a.CpuName">@ShortCpu(a.CpuName)</span>
+                                                        @if (a.CpuCores.HasValue) { <span style="color:var(--text-muted)"> /@a.CpuCores</span> }
+                                                    }
+                                                    else { <span style="color:var(--text-muted)">—</span> }
+                                                </td>
+                                                <td data-label="RAM" style="font-size:12px">@(a.RamMb.HasValue ? $"{a.RamMb/1024} GB" : "—")</td>
+                                                <td data-label="Disk" style="font-size:12px">@(a.DiskInfo ?? "—")</td>
+                                                <td data-label="Status"><span class="pm-badge pm-badge-@a.Status.ToLower()">@a.Status</span></td>
+                                                <td data-label="Last Heartbeat">@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value) : "Never")</td>
+                                                <td data-label="Group">
+                                                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => OpenSubgroup(a)" title="Assign subgroup">
+                                                        @(string.IsNullOrWhiteSpace(a.Subgroup) ? "＋ Group" : a.Subgroup)
+                                                    </button>
+                                                </td>
+                                                <td class="pm-actions">
+                                                    @if (a.Status == "Pending")
+                                                    {
+                                                        <button class="pm-btn pm-btn-success pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">✓ Approve</button>
+                                                        <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => RejectAsync(a.Id)">✗ Reject</button>
+                                                    }
+                                                    @if (a.Status == "Approved")
+                                                    {
+                                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => ApproveAsync(a.Id)">↻ Re-issue</button>
+                                                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => OpenFiles(a)" title="Shared files">📁 Files</button>
+                                                        @if (_canCommand)
+                                                        {
+                                                            <button class="pm-btn pm-btn-primary pm-btn-sm" @onclick="() => ConnectRemoteDesktop(a)" title="Remote desktop via browser">🖥️ Remote Desktop</button>
+                                                            <button class="pm-btn pm-btn-warning pm-btn-sm" @onclick="@(() => OpenCommand(a, "Restart"))" title="Restart machine">🔄 Restart</button>
+                                                            <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="@(() => OpenCommand(a, "Shutdown"))" title="Shutdown machine">⏻ Shutdown</button>
+                                                            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="@(() => OpenCommand(a, "CancelShutdown"))" title="Cancel">🛑 Cancel</button>
+                                                        }
+                                                    }
+                                                    @if (a.Status != "Approved")
+                                                    { <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => DeleteAsync(a.Id)">🗑 Delete</button> }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                }
+            }
         </div>
     }
 
     @if (!_agents.Any()) { <div class="pm-empty">No agents discovered yet.</div> }
+}
+
+@if (_subgroupAgent != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseSubgroup">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>🗂️ Assign subgroup — @_subgroupAgent.MachineName</h2>
+            <p class="pm-hint" style="margin:0 0 .75rem 0">
+                Organise this device under a subgroup within its institution (e.g. Lab1, Class1, Env1).
+                Existing names are suggested; reusing a name keeps devices together. Leave blank to ungroup.
+            </p>
+
+            @if (_subgroupError != null)
+            { <div class="pm-alert pm-alert-error">@_subgroupError</div> }
+
+            <div class="pm-field">
+                <label>Subgroup</label>
+                <input class="pm-input" list="pm-subgroup-list" @bind="_subgroupValue" placeholder="e.g. Lab1" />
+                <datalist id="pm-subgroup-list">
+                    @foreach (var s in _knownSubgroups)
+                    { <option value="@s" /> }
+                </datalist>
+            </div>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseSubgroup">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="SaveSubgroupAsync">Save</button>
+            </div>
+        </div>
+    </div>
 }
 
 @if (_message != null)
@@ -252,12 +315,48 @@ else
     private string? _message;
     private bool _msgError;
 
+    // Tree expand/collapse state (collapsed sets — default expanded)
+    private HashSet<string> _collapsedInst = new();
+    private HashSet<string> _collapsedSub  = new();
+    private void ToggleInst(string k) { if (!_collapsedInst.Add(k)) _collapsedInst.Remove(k); }
+    private void ToggleSub(string k)  { if (!_collapsedSub.Add(k))  _collapsedSub.Remove(k); }
+
+    // Subgroup assignment modal state
+    private AgentDto? _subgroupAgent;
+    private string _subgroupValue = "";
+    private string? _subgroupError;
+    private List<string> _knownSubgroups = [];
+
+    private void OpenSubgroup(AgentDto a)
+    {
+        _subgroupAgent = a;
+        _subgroupValue = a.Subgroup ?? "";
+        _subgroupError = null;
+    }
+    private void CloseSubgroup() { _subgroupAgent = null; _subgroupError = null; }
+
+    private async Task SaveSubgroupAsync()
+    {
+        if (_subgroupAgent == null) return;
+        _subgroupError = null;
+        var (ok, error) = await Api.SetSubgroupAsync(_subgroupAgent.Id, _subgroupValue);
+        if (ok)
+        {
+            CloseSubgroup();
+            await LoadAsync();
+            _knownSubgroups = await Api.GetSubgroupsAsync() ?? [];
+            Toast("Subgroup updated.", false);
+        }
+        else { _subgroupError = error; }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         var role = auth.User.FindFirst(ClaimTypes.Role)?.Value ?? "Viewer";
         _canCommand = role is "SuperAdmin" or "InstitutionAdmin";
         await LoadAsync();
+        _knownSubgroups = await Api.GetSubgroupsAsync() ?? [];
     }
 
     private async Task LoadAsync() { _loading = true; _agents = await Api.GetAgentsAsync() ?? []; _loading = false; }

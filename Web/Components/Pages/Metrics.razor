@@ -31,61 +31,85 @@ else
 {
     @foreach (var group in Grouped)
     {
+        var instKey = group.Key;
+        var instCollapsed = _collapsedInst.Contains(instKey);
         <div class="pm-metric-inst-group">
-            <div class="pm-metric-inst-header">
-                <span class="pm-metric-inst-name">🏢 @group.Key</span>
+            <div class="pm-metric-inst-header pm-tree-inst-head" @onclick="() => ToggleInst(instKey)" style="cursor:pointer">
+                <span class="pm-tree-caret">@(instCollapsed ? "▶" : "▼")</span>
+                <span class="pm-metric-inst-name">🏢 @instKey</span>
                 <span class="pm-metric-inst-count">@group.Count() device@(group.Count() == 1 ? "" : "s") · @group.Count(d => d.Online) online</span>
             </div>
-            <div class="pm-metrics-grid">
-                @foreach (var m in group)
+
+            @if (!instCollapsed)
+            {
+                @foreach (var sub in group.GroupBy(m => string.IsNullOrWhiteSpace(m.Subgroup) ? "Ungrouped" : m.Subgroup!)
+                                          .OrderBy(g => g.Key == "Ungrouped" ? "\uffff" : g.Key))
                 {
-                    <div class="pm-metric-card @(m.Online ? "" : "pm-metric-offline")">
-                        <div class="pm-metric-head">
-                            <div>
-                                <div class="pm-metric-machine">@m.MachineName</div>
-                                <div class="pm-metric-sub">
-                                    @(m.Platform) · @(m.LoggedInUser ?? "no user")
-                                </div>
-                            </div>
-                            <span class="pm-metric-status @(m.Online ? "on" : "off")">
-                                @(m.Online ? "ONLINE" : "OFFLINE")
-                            </span>
+                    var subKey = $"{instKey}／{sub.Key}";
+                    var subCollapsed = _collapsedSub.Contains(subKey);
+                    <div class="pm-tree-sub">
+                        <div class="pm-tree-sub-head" @onclick="() => ToggleSub(subKey)">
+                            <span class="pm-tree-caret">@(subCollapsed ? "▶" : "▼")</span>
+                            <span class="pm-tree-sub-name">@(sub.Key == "Ungrouped" ? "📂 Ungrouped" : $"🗂️ {sub.Key}")</span>
+                            <span class="pm-tree-count">@sub.Count() · @sub.Count(d => d.Online) online</span>
                         </div>
 
-                        <div class="pm-gauges">
-                            @Gauge("CPU", m.CpuPercent, "#3b82f6")
-                            @Gauge("RAM", m.RamPercent, "#10b981")
-                            @Gauge("DISK", m.DiskActivePercent, "#f59e0b")
-                            @NetGauge(m.NetworkKbps)
-                        </div>
+                        @if (!subCollapsed)
+                        {
+                            <div class="pm-metrics-grid">
+                                @foreach (var m in sub)
+                                {
+                                    <div class="pm-metric-card @(m.Online ? "" : "pm-metric-offline")">
+                                        <div class="pm-metric-head">
+                                            <div>
+                                                <div class="pm-metric-machine">@m.MachineName</div>
+                                                <div class="pm-metric-sub">
+                                                    @(m.Platform) · @(m.LoggedInUser ?? "no user")
+                                                </div>
+                                            </div>
+                                            <span class="pm-metric-status @(m.Online ? "on" : "off")">
+                                                @(m.Online ? "ONLINE" : "OFFLINE")
+                                            </span>
+                                        </div>
 
-                        <div class="pm-metric-specs">
-                            @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
-                            @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
-                            @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo@(m.DiskPercent.HasValue ? $" · {m.DiskPercent:F0}% full" : "")</div> }
-                        </div>
+                                        <div class="pm-gauges">
+                                            @Gauge("CPU", m.CpuPercent, "#3b82f6")
+                                            @Gauge("RAM", m.RamPercent, "#10b981")
+                                            @Gauge("DISK", m.DiskActivePercent, "#f59e0b")
+                                            @NetGauge(m.NetworkKbps)
+                                        </div>
 
-                        <div class="pm-sparklines">
-                            <div class="pm-spark-row">
-                                <span class="pm-spark-label">CPU</span>
-                                @Sparkline(m.CpuHistory, "#3b82f6", "%")
+                                        <div class="pm-metric-specs">
+                                            @if (m.CpuName != null) { <div title="@m.CpuName">🧮 @ShortCpu(m.CpuName)@(m.CpuCores.HasValue ? $" · {m.CpuCores} threads" : "")</div> }
+                                            @if (m.RamMb.HasValue)  { <div>🧠 @(m.RamMb/1024) GB@(m.RamUsedMb.HasValue ? $" · {m.RamUsedMb/1024.0:F1} GB used" : "")</div> }
+                                            @if (m.DiskInfo != null) { <div>💽 @m.DiskInfo@(m.DiskPercent.HasValue ? $" · {m.DiskPercent:F0}% full" : "")</div> }
+                                        </div>
+
+                                        <div class="pm-sparklines">
+                                            <div class="pm-spark-row">
+                                                <span class="pm-spark-label">CPU</span>
+                                                @Sparkline(m.CpuHistory, "#3b82f6", "%")
+                                            </div>
+                                            <div class="pm-spark-row">
+                                                <span class="pm-spark-label">RAM</span>
+                                                @Sparkline(m.RamHistory, "#10b981", "%")
+                                            </div>
+                                            <div class="pm-spark-row">
+                                                <span class="pm-spark-label">DISK</span>
+                                                @Sparkline(m.DiskHistory, "#f59e0b", "%")
+                                            </div>
+                                            <div class="pm-spark-row">
+                                                <span class="pm-spark-label">NET</span>
+                                                @Sparkline(m.NetHistory, "#8b5cf6", "kb")
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
                             </div>
-                            <div class="pm-spark-row">
-                                <span class="pm-spark-label">RAM</span>
-                                @Sparkline(m.RamHistory, "#10b981", "%")
-                            </div>
-                            <div class="pm-spark-row">
-                                <span class="pm-spark-label">DISK</span>
-                                @Sparkline(m.DiskHistory, "#f59e0b", "%")
-                            </div>
-                            <div class="pm-spark-row">
-                                <span class="pm-spark-label">NET</span>
-                                @Sparkline(m.NetHistory, "#8b5cf6", "kb")
-                            </div>
-                        </div>
+                        }
                     </div>
                 }
-            </div>
+            }
         </div>
     }
 }
@@ -93,6 +117,12 @@ else
 @code {
     private List<AgentMetricsDto> _metrics = [];
     private bool _loading = true;
+
+    // Tree expand/collapse state (collapsed sets — default expanded)
+    private HashSet<string> _collapsedInst = new();
+    private HashSet<string> _collapsedSub  = new();
+    private void ToggleInst(string k) { if (!_collapsedInst.Add(k)) _collapsedInst.Remove(k); }
+    private void ToggleSub(string k)  { if (!_collapsedSub.Add(k))  _collapsedSub.Remove(k); }
     private string _filter = "";
     private System.Threading.Timer? _timer;
 

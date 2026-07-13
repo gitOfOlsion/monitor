@@ -40,6 +40,18 @@ public class ServerApiClient
     public Task<List<AgentMetricsDto>?> GetMetricsAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<AgentMetricsDto>>("/api/agents/metrics"); }
 
+    public Task<List<string>?> GetSubgroupsAsync()
+    { AttachIdentity(); return _http.GetFromJsonAsync<List<string>>("/api/agents/subgroups"); }
+
+    public async Task<(bool ok, string? error)> SetSubgroupAsync(Guid agentId, string? subgroup)
+    {
+        AttachIdentity();
+        var r = await _http.PutAsJsonAsync($"/api/agents/{agentId}/subgroup", new SetSubgroupRequest(subgroup));
+        if (r.IsSuccessStatusCode) return (true, null);
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, err?.Error ?? "Failed to set subgroup");
+    }
+
     public async Task<bool> ApproveAsync(Guid id)
     { AttachIdentity(); return (await _http.PostAsync($"/api/agents/{id}/approve", null)).IsSuccessStatusCode; }
 

@@ -650,3 +650,30 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
 @media (min-width: 821px) {
   .pm-sidebar { transform: none !important; }
 }
+
+/* ── Institution → subgroup tree (Agents & Metrics) ──────────────────── */
+.pm-tree-inst { margin-bottom: 1.25rem; }
+.pm-tree-inst-head {
+  display: flex; align-items: center; gap: .6rem; cursor: pointer;
+  padding: .55rem .8rem; border-radius: 8px; user-select: none;
+  background: linear-gradient(90deg, rgba(37,99,235,.10), transparent);
+  border-left: 3px solid var(--primary);
+}
+.pm-tree-inst-head:hover { background: linear-gradient(90deg, rgba(37,99,235,.16), transparent); }
+.pm-tree-inst-name { font-weight: 700; font-size: 1rem; flex: 1; }
+.pm-tree-sub { margin: .5rem 0 .5rem 1.25rem; }
+.pm-tree-sub-head {
+  display: flex; align-items: center; gap: .5rem; cursor: pointer;
+  padding: .4rem .7rem; border-radius: 6px; user-select: none;
+  background: var(--surface2); border-left: 2px solid var(--border);
+}
+.pm-tree-sub-head:hover { background: var(--border); }
+.pm-tree-sub-name { font-weight: 600; font-size: .9rem; flex: 1; }
+.pm-tree-caret { font-size: .7rem; color: var(--text-muted); width: .9rem; text-align: center; }
+.pm-tree-count { font-size: .75rem; color: var(--text-muted); background: var(--surface); padding: 1px 8px; border-radius: 10px; }
+.pm-tree-sub .pm-table-wrapper { margin: .5rem 0 0 1.25rem; }
+
+@media (max-width: 820px) {
+  .pm-tree-sub { margin-left: .6rem; }
+  .pm-tree-sub .pm-table-wrapper { margin-left: 0; }
+}
