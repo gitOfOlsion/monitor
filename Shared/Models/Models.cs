@@ -245,6 +245,12 @@ public record SetSubgroupRequest(
     string?  Subgroup          // null/empty clears the subgroup (device becomes Ungrouped)
 );
 
+public record MoveSubgroupRequest(
+    Guid     InstitutionId,
+    string?  FromSubgroup,     // "Ungrouped"/null selects devices with no subgroup
+    string?  ToSubgroup        // null/empty/"Ungrouped" clears; otherwise deduped
+);
+
 // ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────
 public record ValidateLoginRequest(string UserName, string Password);
 

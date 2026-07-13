@@ -78,6 +78,20 @@ public class AgentsController : ScopedController
         return Ok(new { subgroup = applied });
     }
 
+    /// <summary>Bulk-move every device in one subgroup to another (or clear it).</summary>
+    [HttpPost("subgroups/move")]
+    public async Task<IActionResult> MoveSubgroup([FromBody] MoveSubgroupRequest req)
+    {
+        var c = Caller();
+        if (c.Role == "Viewer") return Forbid();
+        var (ok, error, moved, applied) = await _svc.MoveSubgroupAsync(
+            req.InstitutionId, req.FromSubgroup, req.ToSubgroup, c.Scope);
+        if (!ok) return BadRequest(new { error });
+        await _audit.LogAsync(c.Actor, c.Role, c.InstitutionId, "agent.subgroup.move",
+            $"{req.FromSubgroup ?? "Ungrouped"}→{applied ?? "Ungrouped"}", $"{moved} device(s)", c.Ip);
+        return Ok(new { moved, subgroup = applied });
+    }
+
     /// <summary>Live utilisation metrics + sparkline history for all in-scope agents.</summary>
     [HttpGet("metrics")]
     public async Task<IActionResult> GetMetrics()

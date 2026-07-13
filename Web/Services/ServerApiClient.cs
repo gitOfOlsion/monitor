@@ -52,6 +52,21 @@ public class ServerApiClient
         return (false, err?.Error ?? "Failed to set subgroup");
     }
 
+    public async Task<(bool ok, int moved, string? error)> MoveSubgroupAsync(Guid institutionId, string? from, string? to)
+    {
+        AttachIdentity();
+        var r = await _http.PostAsJsonAsync("/api/agents/subgroups/move",
+            new MoveSubgroupRequest(institutionId, from, to));
+        if (r.IsSuccessStatusCode)
+        {
+            var body = await r.Content.ReadFromJsonAsync<MoveResult>();
+            return (true, body?.Moved ?? 0, null);
+        }
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, 0, err?.Error ?? "Failed to move subgroup");
+    }
+    private sealed class MoveResult { public int Moved { get; set; } public string? Subgroup { get; set; } }
+
     public async Task<bool> ApproveAsync(Guid id)
     { AttachIdentity(); return (await _http.PostAsync($"/api/agents/{id}/approve", null)).IsSuccessStatusCode; }
 

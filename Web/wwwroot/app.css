@@ -677,3 +677,9 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
   .pm-tree-sub { margin-left: .6rem; }
   .pm-tree-sub .pm-table-wrapper { margin-left: 0; }
 }
+
+.pm-tree-moveall { margin-left: .5rem; flex-shrink: 0; }
+@media (max-width: 820px) {
+  .pm-tree-sub-head { flex-wrap: wrap; }
+  .pm-tree-moveall { margin-left: 0; margin-top: .3rem; }
+}
