@@ -127,6 +127,58 @@ public class AgentService
         return (true, null, a.Subgroup);
     }
 
+    /// <summary>
+    /// Bulk-reassign every device in one subgroup to another (or clear it). Scoped to a
+    /// single institution. "from" is matched case/whitespace-insensitively; the special
+    /// value "Ungrouped" (or null/empty) selects devices with no subgroup. The target is
+    /// deduped against existing names so a whole group can be moved or renamed in one shot.
+    /// </summary>
+    public async Task<(bool ok, string? error, int moved, string? applied)> MoveSubgroupAsync(
+        Guid institutionId, string? fromSubgroup, string? toSubgroup, Guid? callerInst)
+    {
+        // Institution admins may only touch their own institution
+        if (callerInst.HasValue && institutionId != callerInst.Value)
+            return (false, "Institution is out of your scope", 0, null);
+
+        await using var db = await _db.CreateDbContextAsync();
+
+        var fromTrim = fromSubgroup?.Trim();
+        bool fromUngrouped = string.IsNullOrWhiteSpace(fromTrim) ||
+                             string.Equals(fromTrim, "Ungrouped", StringComparison.OrdinalIgnoreCase);
+
+        // Select the devices in the source group within this institution
+        var agentsInInst = await db.Agents.Where(a => a.InstitutionId == institutionId).ToListAsync();
+        var sourceDevices = fromUngrouped
+            ? agentsInInst.Where(a => string.IsNullOrWhiteSpace(a.Subgroup)).ToList()
+            : agentsInInst.Where(a => a.Subgroup != null &&
+                  string.Equals(a.Subgroup.Trim(), fromTrim, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (sourceDevices.Count == 0)
+            return (false, "No devices found in that group", 0, null);
+
+        // Resolve the target name (clear, or dedup against existing canonical spelling)
+        var toTrim = toSubgroup?.Trim();
+        string? applied;
+        if (string.IsNullOrWhiteSpace(toTrim) ||
+            string.Equals(toTrim, "Ungrouped", StringComparison.OrdinalIgnoreCase))
+        {
+            applied = null; // → Ungrouped
+        }
+        else
+        {
+            var existing = agentsInInst
+                .Where(a => a.Subgroup != null)
+                .Select(a => a.Subgroup!)
+                .Distinct()
+                .FirstOrDefault(e => string.Equals(e.Trim(), toTrim, StringComparison.OrdinalIgnoreCase));
+            applied = existing ?? toTrim;
+        }
+
+        foreach (var a in sourceDevices) a.Subgroup = applied;
+        await db.SaveChangesAsync();
+        return (true, null, sourceDevices.Count, applied);
+    }
+
     /// <summary>Distinct subgroup names in an institution (for suggestions), sorted.</summary>
     public async Task<List<string>> GetSubgroupsAsync(Guid? institutionId)
     {

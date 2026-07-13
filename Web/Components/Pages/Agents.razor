@@ -40,10 +40,15 @@ else
                     var subKey = $"{instKey}／{sub.Key}";
                     var subCollapsed = _collapsedSub.Contains(subKey);
                     <div class="pm-tree-sub">
-                        <div class="pm-tree-sub-head" @onclick="() => ToggleSub(subKey)">
-                            <span class="pm-tree-caret">@(subCollapsed ? "▶" : "▼")</span>
-                            <span class="pm-tree-sub-name">@(sub.Key == "Ungrouped" ? "📂 Ungrouped" : $"🗂️ {sub.Key}")</span>
+                        <div class="pm-tree-sub-head">
+                            <span class="pm-tree-caret" @onclick="() => ToggleSub(subKey)" style="cursor:pointer">@(subCollapsed ? "▶" : "▼")</span>
+                            <span class="pm-tree-sub-name" @onclick="() => ToggleSub(subKey)" style="cursor:pointer;flex:1">@(sub.Key == "Ungrouped" ? "📂 Ungrouped" : $"🗂️ {sub.Key}")</span>
                             <span class="pm-tree-count">@sub.Count()</span>
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm pm-tree-moveall"
+                                    @onclick="() => OpenMoveGroup(sub.First().InstitutionId, instKey, sub.Key, sub.Count())"
+                                    title="Move all @sub.Count() device(s) in this group">
+                                ⇄ Move all
+                            </button>
                         </div>
 
                         @if (!subCollapsed)
@@ -146,6 +151,37 @@ else
             <div class="pm-modal-actions">
                 <button class="pm-btn pm-btn-secondary" @onclick="CloseSubgroup">Cancel</button>
                 <button class="pm-btn pm-btn-primary" @onclick="SaveSubgroupAsync">Save</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_moveGroup != null)
+{
+    <div class="pm-modal-overlay" @onclick="CloseMoveGroup">
+        <div class="pm-modal" @onclick:stopPropagation>
+            <h2>⇄ Move group — @_moveGroup.From</h2>
+            <p class="pm-hint" style="margin:0 0 .75rem 0">
+                Move all <strong>@_moveGroup.Count device(s)</strong> currently in
+                <strong>@_moveGroup.From</strong> to another subgroup. Type a new name to rename the
+                group, pick an existing one to merge, or leave blank to ungroup them all.
+            </p>
+
+            @if (_moveError != null)
+            { <div class="pm-alert pm-alert-error">@_moveError</div> }
+
+            <div class="pm-field">
+                <label>Move to subgroup</label>
+                <input class="pm-input" list="pm-subgroup-list" @bind="_moveTarget" placeholder="e.g. Lab2 (blank = Ungrouped)" />
+                <datalist id="pm-subgroup-list">
+                    @foreach (var s in _knownSubgroups)
+                    { <option value="@s" /> }
+                </datalist>
+            </div>
+
+            <div class="pm-modal-actions">
+                <button class="pm-btn pm-btn-secondary" @onclick="CloseMoveGroup">Cancel</button>
+                <button class="pm-btn pm-btn-primary" @onclick="SaveMoveGroupAsync">Move @_moveGroup.Count device(s)</button>
             </div>
         </div>
     </div>
@@ -334,6 +370,37 @@ else
         _subgroupError = null;
     }
     private void CloseSubgroup() { _subgroupAgent = null; _subgroupError = null; }
+
+    // Bulk move-group modal state
+    private record MoveGroupCtx(Guid InstitutionId, string InstName, string From, int Count);
+    private MoveGroupCtx? _moveGroup;
+    private string _moveTarget = "";
+    private string? _moveError;
+
+    private void OpenMoveGroup(Guid instId, string instName, string fromGroup, int count)
+    {
+        _moveGroup = new MoveGroupCtx(instId, instName, fromGroup, count);
+        _moveTarget = "";
+        _moveError = null;
+    }
+    private void CloseMoveGroup() { _moveGroup = null; _moveError = null; }
+
+    private async Task SaveMoveGroupAsync()
+    {
+        if (_moveGroup == null) return;
+        _moveError = null;
+        // "Ungrouped" pseudo-group maps to null on the wire
+        var from = _moveGroup.From == "Ungrouped" ? null : _moveGroup.From;
+        var (ok, moved, error) = await Api.MoveSubgroupAsync(_moveGroup.InstitutionId, from, _moveTarget);
+        if (ok)
+        {
+            CloseMoveGroup();
+            await LoadAsync();
+            _knownSubgroups = await Api.GetSubgroupsAsync() ?? [];
+            Toast($"Moved {moved} device(s).", false);
+        }
+        else { _moveError = error; }
+    }
 
     private async Task SaveSubgroupAsync()
     {
