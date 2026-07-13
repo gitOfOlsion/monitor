@@ -75,12 +75,16 @@ public class ServerApiClient
     { AttachIdentity(); return _http.GetFromJsonAsync<List<InstitutionDto>>("/api/institutions"); }
 
     // ── Reporting ────────────────────────────────────────────────────────────
-    public async Task<ReportResultDto?> GenerateReportAsync(ReportRequest req)
+    public async Task<(ReportResultDto? result, string? error)> GenerateReportAsync(ReportRequest req)
     {
         AttachIdentity();
         var r = await _http.PostAsJsonAsync("/api/events/report", req);
-        if (!r.IsSuccessStatusCode) return null;
-        return await r.Content.ReadFromJsonAsync<ReportResultDto>();
+        if (r.IsSuccessStatusCode)
+            return (await r.Content.ReadFromJsonAsync<ReportResultDto>(), null);
+        // Surface the server's error message (e.g. feature disabled) instead of hiding it.
+        string? msg = null;
+        try { msg = (await r.Content.ReadFromJsonAsync<ErrorResponse>())?.Error; } catch { }
+        return (null, msg ?? $"Server returned {(int)r.StatusCode}.");
     }
 
     // ── Feature management ───────────────────────────────────────────────────
