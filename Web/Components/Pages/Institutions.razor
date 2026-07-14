@@ -147,6 +147,11 @@ else
                                     @onclick="() => ShowDownloads(i)">
                                 📦 Download Agent
                             </button>
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm"
+                                    @onclick="() => OpenRdpCredentials(i)"
+                                    title="Set the Windows sign-in credentials used for browser remote desktop">
+                                🔑 RDP Credentials
+                            </button>
                         </td>
                     </tr>
                 }
