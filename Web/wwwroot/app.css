@@ -683,3 +683,23 @@ code { font-family: "Fira Code", monospace; font-size: 12px; background: var(--s
   .pm-tree-sub-head { flex-wrap: wrap; }
   .pm-tree-moveall { margin-left: 0; margin-top: .3rem; }
 }
+
+/* ── Demo signup / login extras ──────────────────────────────────────── */
+.pm-login-subtitle { font-size: .85rem; color: var(--text-muted); margin: -.25rem 0 1rem 0; }
+.pm-login-divider {
+  display: flex; align-items: center; text-align: center;
+  color: var(--text-muted); font-size: .8rem; margin: 1rem 0;
+}
+.pm-login-divider::before, .pm-login-divider::after {
+  content: ""; flex: 1; border-bottom: 1px solid var(--border);
+}
+.pm-login-divider span { padding: 0 .75rem; }
+.pm-hero-link { color: rgba(255,255,255,.85); font-weight: 600; margin-left: 1rem; border-bottom: 1px solid rgba(255,255,255,.4); padding-bottom: 2px; }
+.pm-hero-link:hover { color: #fff; }
+
+/* Read-only notice (e.g. Features page for institution admins) */
+.pm-readonly-note {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-left: 3px solid var(--primary); border-radius: 8px;
+  padding: .7rem .9rem; margin: 0 0 1rem 0; font-size: .88rem; color: var(--text-muted);
+}

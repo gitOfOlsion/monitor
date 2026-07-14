@@ -251,6 +251,25 @@ public record MoveSubgroupRequest(
     string?  ToSubgroup        // null/empty/"Ungrouped" clears; otherwise deduped
 );
 
+// ── Demo signup ─────────────────────────────────────────────────────────────
+public record CaptchaChallengeDto(string Question, string Token);
+
+public record DemoSignupRequest(
+    string InstitutionName,
+    string Username,
+    string Email,
+    string Password,
+    string CaptchaToken,
+    string CaptchaAnswer
+);
+
+public record DemoInfoDto(
+    bool     IsDemo,
+    DateTime? ExpiresAt,
+    DateTime? PurgeAt,
+    int      DaysLeft
+);
+
 // ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────
 public record ValidateLoginRequest(string UserName, string Password);
 

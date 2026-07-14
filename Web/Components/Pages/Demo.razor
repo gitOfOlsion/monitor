@@ -1,0 +1,115 @@
+@page "/demo"
+@layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
+@inject ServerApiClient Api
+@inject NavigationManager Nav
+
+<PageTitle>Start a Demo — Peripheral Monitor</PageTitle>
+
+<div class="pm-login-wrap">
+    <div class="pm-login-left">
+        <div class="pm-login-brand">
+            <span class="pm-login-icon">📡</span>
+            <h1>Try Peripheral Monitor</h1>
+            <p class="pm-login-tagline">Spin up your own institution and admin account in seconds — no setup, no commitment.</p>
+        </div>
+        <ul class="pm-login-features">
+            <li>🖥️ Real-time peripheral & metrics monitoring</li>
+            <li>🔑 Browser-based remote desktop</li>
+            <li>📄 Reporting and audit log</li>
+            <li>🗂️ Organise devices into groups</li>
+        </ul>
+        <p class="pm-login-footer">
+            Your demo runs for <strong>@DemoDays days</strong>. After it ends, sign-in is disabled and the
+            data is removed 15 days later.
+        </p>
+    </div>
+
+    <div class="pm-login-right">
+        <div class="pm-login-card">
+            <h2>Create your demo</h2>
+            <p class="pm-login-subtitle">All features are enabled except Application Control (reserved for system administrators).</p>
+
+            @if (_success)
+            {
+                <div class="pm-alert pm-alert-success">
+                    ✅ Your demo is ready! You can now <a href="/login">sign in</a> with the username and password you chose.
+                </div>
+            }
+            else
+            {
+                @if (_error != null)
+                { <div class="pm-alert pm-alert-error">@_error</div> }
+
+                <div class="pm-field">
+                    <label>Institution name</label>
+                    <input class="pm-input" @bind="_institution" placeholder="e.g. Springfield University" />
+                </div>
+                <div class="pm-field">
+                    <label>Admin username</label>
+                    <input class="pm-input" @bind="_username" placeholder="choose a username" autocomplete="username" />
+                </div>
+                <div class="pm-field">
+                    <label>Email</label>
+                    <input class="pm-input" @bind="_email" type="email" placeholder="you@example.com" />
+                </div>
+                <div class="pm-field">
+                    <label>Password</label>
+                    <input class="pm-input" @bind="_password" type="password" placeholder="at least 6 characters" autocomplete="new-password" />
+                </div>
+
+                <div class="pm-field">
+                    <label>Verification: @(_captcha?.Question ?? "loading…")</label>
+                    <div style="display:flex; gap:.5rem; align-items:center">
+                        <input class="pm-input" @bind="_captchaAnswer" placeholder="your answer" style="flex:1" />
+                        <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="RefreshCaptcha" type="button" title="New question">↻</button>
+                    </div>
+                </div>
+
+                <button class="pm-btn pm-btn-primary pm-btn-full" style="margin-top:.5rem"
+                        @onclick="SubmitAsync" disabled="@_submitting">
+                    @(_submitting ? "Creating…" : "Start my demo →")
+                </button>
+
+                <p class="pm-login-hint">Already have an account? <a href="/login">Sign in</a></p>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private int DemoDays = 15;
+    private string _institution = "", _username = "", _email = "", _password = "", _captchaAnswer = "";
+    private CaptchaChallengeDto? _captcha;
+    private bool _submitting, _success;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await RefreshCaptcha();
+
+    private async Task RefreshCaptcha()
+    {
+        _captchaAnswer = "";
+        try { _captcha = await Api.GetCaptchaAsync(); } catch { _captcha = null; }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_institution) || string.IsNullOrWhiteSpace(_username)
+            || string.IsNullOrWhiteSpace(_email) || string.IsNullOrWhiteSpace(_password))
+        { _error = "Please fill in all fields."; return; }
+        if (_captcha == null) { _error = "Verification failed to load. Please refresh."; return; }
+
+        _submitting = true;
+        var req = new DemoSignupRequest(_institution, _username, _email, _password,
+                                        _captcha.Token, _captchaAnswer);
+        var (ok, error) = await Api.DemoSignupAsync(req);
+        _submitting = false;
+
+        if (ok) { _success = true; }
+        else
+        {
+            _error = error;
+            await RefreshCaptcha(); // fresh challenge after a failed attempt
+        }
+    }
+}

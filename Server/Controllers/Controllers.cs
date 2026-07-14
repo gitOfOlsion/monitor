@@ -692,18 +692,66 @@ public class AuthValidationController : ScopedController
 {
     private readonly UserService  _users;
     private readonly AuditService _audit;
-    public AuthValidationController(UserService users, AuditService audit) { _users = users; _audit = audit; }
+    private readonly DemoService  _demo;
+    public AuthValidationController(UserService users, AuditService audit, DemoService demo)
+    { _users = users; _audit = audit; _demo = demo; }
 
     [HttpPost("validate")]
     public async Task<IActionResult> Validate([FromBody] ValidateLoginRequest req)
     {
         var result = await _users.ValidateAsync(req.UserName, req.Password);
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        // Block logins for demo institutions whose trial has expired.
+        if (result.Success && result.InstitutionId.HasValue &&
+            await _demo.IsExpiredAsync(result.InstitutionId.Value))
+        {
+            await _audit.LogAsync(req.UserName, result.Role ?? "?", result.InstitutionId,
+                "auth.demo_expired", req.UserName, null, ip);
+            // Signal failure with a special marker the Web login page recognises.
+            return Ok(new ValidateLoginResponse(false, "DEMO_EXPIRED", null, null, null, null));
+        }
+
         if (result.Success)
             await _audit.LogAsync(result.UserName!, result.Role!, result.InstitutionId, "auth.login", result.UserName!, null, ip);
         else
             await _audit.LogAsync(req.UserName, "?", null, "auth.login_failed", req.UserName, null, ip);
         return Ok(result);
+    }
+}
+
+// ── Demo (self-service trial) ──────────────────────────────────────────────
+[ApiController, Route("api/demo"), AllowAnonymous]
+public class DemoController : ControllerBase
+{
+    private readonly DemoService    _demo;
+    private readonly CaptchaService _captcha;
+    private readonly AuditService   _audit;
+    public DemoController(DemoService demo, CaptchaService captcha, AuditService audit)
+    { _demo = demo; _captcha = captcha; _audit = audit; }
+
+    /// <summary>Fetch a fresh CAPTCHA challenge for the demo signup form.</summary>
+    [HttpGet("captcha")]
+    public IActionResult GetCaptcha()
+    {
+        var c = _captcha.Generate();
+        return Ok(new CaptchaChallengeDto(c.Question, c.Token));
+    }
+
+    /// <summary>Create a self-service demo institution + admin.</summary>
+    [HttpPost("signup")]
+    public async Task<IActionResult> Signup([FromBody] DemoSignupRequest req)
+    {
+        if (!_captcha.Validate(req.CaptchaToken, req.CaptchaAnswer))
+            return BadRequest(new { error = "Incorrect answer to the verification question. Please try again." });
+
+        var (ok, error) = await _demo.CreateDemoAsync(
+            req.InstitutionName, req.Username, req.Email, req.Password);
+        if (!ok) return BadRequest(new { error });
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        await _audit.LogAsync(req.Username, "InstitutionAdmin", null, "demo.signup", req.InstitutionName, null, ip);
+        return Ok(new { message = "Demo created. You can now sign in." });
     }
 }
 

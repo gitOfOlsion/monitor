@@ -1,5 +1,5 @@
 @page "/features"
-@attribute [Authorize(Roles = "SuperAdmin")]
+@attribute [Authorize(Roles = "SuperAdmin,InstitutionAdmin")]
 @using System.Security.Claims
 @inject ServerApiClient Api
 @inject AuthenticationStateProvider AuthState
@@ -7,22 +7,32 @@
 <PageTitle>Feature Management</PageTitle>
 
 <div class="pm-page-header">
-    <h1>Feature Management</h1>
+    <h1>@(_isSuperAdmin ? "Feature Management" : "Features")</h1>
 </div>
 
-<p class="pm-hint" style="margin:0 0 1rem 0">
-    Turn features on or off per institution, or override per device. A device setting wins over the
-    institution setting; if neither is set, the feature's default applies. Changes take effect immediately.
-</p>
+@if (_isSuperAdmin)
+{
+    <p class="pm-hint" style="margin:0 0 1rem 0">
+        Turn features on or off per institution, or override per device. A device setting wins over the
+        institution setting; if neither is set, the feature's default applies. Changes take effect immediately.
+    </p>
+}
+else
+{
+    <div class="pm-readonly-note">
+        🔒 This is a read-only view of the features enabled for your institution.
+        Changing feature availability is reserved for the system administrator.
+    </div>
+}
 
 @if (_msg != null)
 {
     <div class="pm-alert @(_msgOk ? "pm-alert-success" : "pm-alert-error")" style="margin-bottom:1rem">@_msg</div>
 }
 
-<div class="pm-features-toolbar">
-    @if (_isSuperAdmin)
-    {
+@if (_isSuperAdmin)
+{
+    <div class="pm-features-toolbar">
         <div class="pm-field" style="margin:0">
             <label>Institution</label>
             <select class="pm-input pm-input-sm" @bind="_selectedInstitution" @bind:after="OnInstitutionChanged">
@@ -31,31 +41,31 @@
                 { <option value="@i.Id">@i.Name</option> }
             </select>
         </div>
-    }
 
-    @if (_selectedInstitution != "" || !_isSuperAdmin)
-    {
-        <div class="pm-field" style="margin:0">
-            <label>Scope</label>
-            <select class="pm-input pm-input-sm" @bind="_scopeMode" @bind:after="OnScopeChanged">
-                <option value="institution">Whole institution</option>
-                <option value="device">Specific device</option>
-            </select>
-        </div>
-
-        @if (_scopeMode == "device")
+        @if (_selectedInstitution != "")
         {
             <div class="pm-field" style="margin:0">
-                <label>Device</label>
-                <select class="pm-input pm-input-sm" @bind="_selectedAgent" @bind:after="LoadFeatures">
-                    <option value="">— select device —</option>
-                    @foreach (var a in _agents)
-                    { <option value="@a.Id">@a.MachineName</option> }
+                <label>Scope</label>
+                <select class="pm-input pm-input-sm" @bind="_scopeMode" @bind:after="OnScopeChanged">
+                    <option value="institution">Whole institution</option>
+                    <option value="device">Specific device</option>
                 </select>
             </div>
+
+            @if (_scopeMode == "device")
+            {
+                <div class="pm-field" style="margin:0">
+                    <label>Device</label>
+                    <select class="pm-input pm-input-sm" @bind="_selectedAgent" @bind:after="LoadFeatures">
+                        <option value="">— select device —</option>
+                        @foreach (var a in _agents)
+                        { <option value="@a.Id">@a.MachineName</option> }
+                    </select>
+                </div>
+            }
         }
-    }
-</div>
+    </div>
+}
 
 @if (_loading)
 {
@@ -63,7 +73,9 @@
 }
 else if (_features.Count == 0)
 {
-    <div class="pm-empty">Select an institution@(_scopeMode == "device" ? " and device" : "") to manage features.</div>
+    <div class="pm-empty">
+        @(_isSuperAdmin ? $"Select an institution{(_scopeMode == "device" ? " and device" : "")} to manage features." : "No features to display.")
+    </div>
 }
 else
 {
@@ -81,32 +93,35 @@ else
                     </div>
                     <div class="pm-feature-desc">@f.Description</div>
                     <div class="pm-feature-inherit">
-                        @if (_scopeMode == "device")
+                        @if (_isSuperAdmin && _scopeMode == "device")
                         {
                             <span>Institution: <strong>@StateLabel(f.InstitutionEnabled, f.DefaultEnabled)</strong></span>
                             @if (f.AgentEnabled.HasValue)
                             { <span class="pm-feature-override">· device override active</span> }
                         }
-                        else
+                        else if (_isSuperAdmin)
                         {
                             <span>Default: <strong>@(f.DefaultEnabled ? "On" : "Off")</strong></span>
                         }
                     </div>
                 </div>
-                <div class="pm-feature-controls">
-                    @{
-                        bool? currentOverride = _scopeMode == "device" ? f.AgentEnabled : f.InstitutionEnabled;
-                    }
-                    <select class="pm-input pm-input-sm" value="@OverrideValue(currentOverride)"
-                            @onchange="@(e => SetFeature(f, e.Value?.ToString()))">
-                        <option value="inherit">@(_scopeMode == "device" ? "Inherit from institution" : "Use default")</option>
-                        <option value="on">Force ON</option>
-                        <option value="off">Force OFF</option>
-                    </select>
-                </div>
+                @if (_isSuperAdmin)
+                {
+                    <div class="pm-feature-controls">
+                        @{
+                            bool? currentOverride = _scopeMode == "device" ? f.AgentEnabled : f.InstitutionEnabled;
+                        }
+                        <select class="pm-input pm-input-sm" value="@OverrideValue(currentOverride)"
+                                @onchange="@(e => SetFeature(f, e.Value?.ToString()))">
+                            <option value="inherit">@(_scopeMode == "device" ? "Inherit from institution" : "Use default")</option>
+                            <option value="on">Force ON</option>
+                            <option value="off">Force OFF</option>
+                        </select>
+                    </div>
+                }
             </div>
 
-            @if (f.HasConfig && f.Key == "app-install" && f.Effective)
+            @if (_isSuperAdmin && f.HasConfig && f.Key == "app-install" && f.Effective)
             {
                 <div class="pm-feature-config">
                     <div class="pm-feature-config-title">🛡️ Application Control policy (block model)</div>
@@ -135,11 +150,14 @@ else
         }
     </div>
 
-    <p class="pm-hint" style="margin-top:1rem">
-        Application Control uses a block model: listed extensions / name patterns are blocked for the
-        logged-in user on the device; allowed patterns are exceptions. Enforcement is applied by the
-        agent (Windows). Toggling the feature off removes enforcement cleanly.
-    </p>
+    @if (_isSuperAdmin)
+    {
+        <p class="pm-hint" style="margin-top:1rem">
+            Application Control uses a block model: listed extensions / name patterns are blocked for the
+            logged-in user on the device; allowed patterns are exceptions. Enforcement is applied by the
+            agent (Windows). Toggling the feature off removes enforcement cleanly.
+        </p>
+    }
 }
 
 @code {
@@ -162,10 +180,21 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        // SuperAdmin-only page. Always start by choosing an institution.
         var auth = await AuthState.GetAuthenticationStateAsync();
         _isSuperAdmin = auth.User.IsInRole("SuperAdmin");
-        _institutions = await Api.GetInstitutionsAsync() ?? [];
+
+        if (_isSuperAdmin)
+        {
+            // Full management: choose an institution first.
+            _institutions = await Api.GetInstitutionsAsync() ?? [];
+        }
+        else
+        {
+            // Institution admin: read-only view of their own institution's features.
+            var instClaim = auth.User.FindFirst("institution_id")?.Value;
+            if (Guid.TryParse(instClaim, out var g)) _myInstitution = g;
+            _features = await Api.GetMyFeaturesAsync() ?? [];
+        }
     }
 
     private Guid? CurrentInstitution =>

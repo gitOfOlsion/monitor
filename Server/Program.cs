@@ -80,10 +80,13 @@ try
     builder.Services.AddHttpClient();
     builder.Services.AddScoped<UserService>();
     builder.Services.AddScoped<FeatureService>();
+    builder.Services.AddSingleton<CaptchaService>();
+    builder.Services.AddScoped<DemoService>();
     builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
     builder.Services.AddHostedService<OfflineDetectorService>();
+    builder.Services.AddHostedService<DemoPurgeService>();
     builder.Services.AddControllers().AddJsonOptions(o =>
         o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles);
 
@@ -111,6 +114,9 @@ try
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""RamMb""    BIGINT;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""DiskInfo"" TEXT;
             ALTER TABLE ""agents"" ADD COLUMN IF NOT EXISTS ""Subgroup"" TEXT;
+            ALTER TABLE ""institutions"" ADD COLUMN IF NOT EXISTS ""IsDemo"" BOOLEAN NOT NULL DEFAULT FALSE;
+            ALTER TABLE ""institutions"" ADD COLUMN IF NOT EXISTS ""ExpiresAt"" TIMESTAMPTZ;
+            ALTER TABLE ""institutions"" ADD COLUMN IF NOT EXISTS ""PurgeAt"" TIMESTAMPTZ;
             ALTER TABLE ""device_events"" ADD COLUMN IF NOT EXISTS ""EventId"" UUID NOT NULL DEFAULT gen_random_uuid();
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_device_events_EventId"" ON ""device_events"" (""EventId"");
             CREATE TABLE IF NOT EXISTS ""feature_flags"" (
