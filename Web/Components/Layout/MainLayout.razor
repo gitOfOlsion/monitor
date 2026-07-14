@@ -54,13 +54,11 @@
                     <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="adminAuth">
                         <li class="pm-nav-divider"></li>
                         <li class="pm-nav-section">Administration</li>
-                        <AuthorizeView Roles="SuperAdmin" Context="featAuth">
-                            <li>
-                                <NavLink href="/features">
-                                    <span class="pm-nav-icon">🎛️</span> Features
-                                </NavLink>
-                            </li>
-                        </AuthorizeView>
+                        <li>
+                            <NavLink href="/features">
+                                <span class="pm-nav-icon">🎛️</span> Features
+                            </NavLink>
+                        </li>
                         @if (_reportsEnabled)
                         {
                             <li>

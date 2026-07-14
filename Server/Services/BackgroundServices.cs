@@ -57,3 +57,30 @@ public class OfflineDetectorService : BackgroundService
         }
     }
 }
+
+/// <summary>Hourly sweep that purges demo institutions past their 30-day PurgeAt.</summary>
+public class DemoPurgeService : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopes;
+    private readonly ILogger<DemoPurgeService> _log;
+
+    public DemoPurgeService(IServiceScopeFactory scopes, ILogger<DemoPurgeService> log)
+    { _scopes = scopes; _log = log; }
+
+    protected override async Task ExecuteAsync(CancellationToken ct)
+    {
+        // Small initial delay so startup/migrations finish first
+        try { await Task.Delay(TimeSpan.FromMinutes(2), ct); } catch { }
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = _scopes.CreateScope();
+                var demo = scope.ServiceProvider.GetRequiredService<DemoService>();
+                await demo.PurgeExpiredAsync();
+            }
+            catch (Exception ex) { _log.LogWarning(ex, "DemoPurge error"); }
+            await Task.Delay(TimeSpan.FromHours(1), ct);
+        }
+    }
+}

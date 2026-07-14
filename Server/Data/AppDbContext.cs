@@ -24,6 +24,11 @@ public class InstitutionEntity
     public string?  LogoUrl      { get; set; }
     public DateTime CreatedAt    { get; set; } = DateTime.UtcNow;
 
+    // Demo (self-service trial) lifecycle
+    public bool      IsDemo    { get; set; }          // true = time-limited trial institution
+    public DateTime? ExpiresAt { get; set; }          // login blocked after this (15 days)
+    public DateTime? PurgeAt   { get; set; }          // hard-deleted after this (30 days)
+
     // RDP credentials for Guacamole remote desktop (AES-encrypted at rest)
     public string?  RdpUsername        { get; set; }  // domain\user or user@domain
     public string?  RdpPasswordEncrypted { get; set; }

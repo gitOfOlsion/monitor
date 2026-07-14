@@ -43,6 +43,18 @@ public class ServerApiClient
     public Task<List<string>?> GetSubgroupsAsync()
     { AttachIdentity(); return _http.GetFromJsonAsync<List<string>>("/api/agents/subgroups"); }
 
+    // ── Demo signup ──────────────────────────────────────────────────────────
+    public Task<CaptchaChallengeDto?> GetCaptchaAsync()
+    { return _http.GetFromJsonAsync<CaptchaChallengeDto>("/api/demo/captcha"); }
+
+    public async Task<(bool ok, string? error)> DemoSignupAsync(DemoSignupRequest req)
+    {
+        var r = await _http.PostAsJsonAsync("/api/demo/signup", req);
+        if (r.IsSuccessStatusCode) return (true, null);
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, err?.Error ?? "Demo signup failed");
+    }
+
     public async Task<(bool ok, string? error)> SetSubgroupAsync(Guid agentId, string? subgroup)
     {
         AttachIdentity();
