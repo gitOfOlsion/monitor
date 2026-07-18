@@ -1,0 +1,139 @@
+@page "/messages"
+@attribute [Authorize(Roles = "SuperAdmin")]
+@inject ServerApiClient Api
+@inject TimeZoneService TZ
+
+<PageTitle>Messages</PageTitle>
+
+<div class="pm-page-header">
+    <h1>Messages</h1>
+    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="LoadAsync">↻ Refresh</button>
+</div>
+
+<p class="pm-hint" style="margin:0 0 1rem 0">
+    Messages submitted through the contact form on the public landing page.
+</p>
+
+<div class="pm-features-toolbar">
+    <div class="pm-field" style="margin:0">
+        <label>Show</label>
+        <select class="pm-input pm-input-sm" @bind="_filter">
+            <option value="all">All (@_messages.Count)</option>
+            <option value="unread">Unread (@_messages.Count(m => !m.IsRead))</option>
+            <option value="read">Read</option>
+        </select>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="pm-loading">Loading…</div>
+}
+else if (!Filtered.Any())
+{
+    <div class="pm-empty">
+        @(_messages.Count == 0 ? "No messages yet." : "No messages match this filter.")
+    </div>
+}
+else
+{
+    <div class="pm-msg-list">
+        @foreach (var m in Filtered)
+        {
+            <div class="pm-msg-card @(m.IsRead ? "" : "pm-msg-unread")">
+                <div class="pm-msg-head" @onclick="() => Toggle(m.Id)">
+                    <span class="pm-tree-caret">@(_open.Contains(m.Id) ? "▼" : "▶")</span>
+                    @if (!m.IsRead)
+                    { <span class="pm-msg-dot" title="Unread"></span> }
+                    <span class="pm-msg-subject">@m.Subject</span>
+                    <span class="pm-msg-from">@m.Name</span>
+                    <span class="pm-msg-date">@Fmt(m.CreatedAt)</span>
+                </div>
+
+                @if (_open.Contains(m.Id))
+                {
+                    <div class="pm-msg-body">
+                        <div class="pm-msg-meta">
+                            <div><strong>From:</strong> @m.Name</div>
+                            <div><strong>Email:</strong> <a href="mailto:@m.Email">@m.Email</a></div>
+                            @if (!string.IsNullOrWhiteSpace(m.Phone))
+                            { <div><strong>Phone:</strong> <a href="tel:@m.Phone">@m.Phone</a></div> }
+                            <div><strong>Received:</strong> @Fmt(m.CreatedAt)</div>
+                        </div>
+                        <div class="pm-msg-text">@m.Message</div>
+                        <div class="pm-msg-actions">
+                            <a class="pm-btn pm-btn-primary pm-btn-sm"
+                               href="mailto:@m.Email?subject=@(Uri.EscapeDataString("Re: " + m.Subject))">
+                                ✉️ Reply by email
+                            </a>
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="() => SetReadAsync(m, !m.IsRead)">
+                                @(m.IsRead ? "Mark unread" : "Mark read")
+                            </button>
+                            <button class="pm-btn pm-btn-danger pm-btn-sm" @onclick="() => DeleteAsync(m)">🗑 Delete</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ContactMessageDto> _messages = [];
+    private HashSet<long> _open = new();
+    private string _filter = "all";
+    private bool _loading = true;
+
+    private IEnumerable<ContactMessageDto> Filtered => _filter switch
+    {
+        "unread" => _messages.Where(m => !m.IsRead),
+        "read"   => _messages.Where(m => m.IsRead),
+        _        => _messages
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _messages = await Api.GetContactMessagesAsync() ?? [];
+        _loading = false;
+    }
+
+    // Opening a message marks it read automatically.
+    private async Task Toggle(long id)
+    {
+        if (!_open.Add(id)) { _open.Remove(id); return; }
+        var m = _messages.FirstOrDefault(x => x.Id == id);
+        if (m is { IsRead: false }) await SetReadAsync(m, true);
+    }
+
+    private async Task SetReadAsync(ContactMessageDto m, bool read)
+    {
+        if (await Api.SetContactReadAsync(m.Id, read)) m.IsRead = read;
+    }
+
+    private async Task DeleteAsync(ContactMessageDto m)
+    {
+        if (await Api.DeleteContactMessageAsync(m.Id))
+        {
+            _messages.Remove(m);
+            _open.Remove(m.Id);
+        }
+    }
+
+    private TimeSpan _tzOffset = TimeSpan.Zero;
+    private bool _tzFetched;
+
+    private string Fmt(DateTime utc) => utc.Add(_tzOffset).ToString("yyyy-MM-dd HH:mm");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_tzFetched)
+        {
+            _tzFetched = true;
+            _tzOffset = await TZ.GetOffsetAsync();
+            StateHasChanged();
+        }
+    }
+}

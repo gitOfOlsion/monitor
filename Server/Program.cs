@@ -82,6 +82,7 @@ try
     builder.Services.AddScoped<FeatureService>();
     builder.Services.AddSingleton<CaptchaService>();
     builder.Services.AddScoped<DemoService>();
+    builder.Services.AddScoped<ContactService>();
     builder.Services.AddScoped<AuditService>();
     builder.Services.AddSingleton<AgentPackageService>();
     builder.Services.AddHostedService<DiscoveryHostedService>();
@@ -131,6 +132,20 @@ try
             );
             CREATE UNIQUE INDEX IF NOT EXISTS ""IX_feature_flags_key_scope"" ON ""feature_flags"" (""FeatureKey"", ""Scope"", ""ScopeId"");
             CREATE INDEX IF NOT EXISTS ""IX_feature_flags_scope"" ON ""feature_flags"" (""Scope"", ""ScopeId"");
+
+            CREATE TABLE IF NOT EXISTS ""contact_messages"" (
+                ""Id""        BIGSERIAL PRIMARY KEY,
+                ""Name""      TEXT NOT NULL,
+                ""Email""     TEXT NOT NULL,
+                ""Phone""     TEXT,
+                ""Subject""   TEXT NOT NULL,
+                ""Message""   TEXT NOT NULL,
+                ""IsRead""    BOOLEAN NOT NULL DEFAULT FALSE,
+                ""CreatedAt"" TIMESTAMPTZ NOT NULL DEFAULT now(),
+                ""Ip""        TEXT
+            );
+            CREATE INDEX IF NOT EXISTS ""IX_contact_messages_created"" ON ""contact_messages"" (""CreatedAt"");
+            CREATE INDEX IF NOT EXISTS ""IX_contact_messages_isread"" ON ""contact_messages"" (""IsRead"");
         ";
         await cmd.ExecuteNonQueryAsync();
 

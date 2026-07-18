@@ -139,6 +139,23 @@ public class FeatureFlagEntity
     public string?  UpdatedBy  { get; set; }
 }
 
+/// <summary>
+/// A message submitted through the public contact form on the landing page.
+/// Stored in the database (no mail server) and read by SuperAdmin in the app.
+/// </summary>
+public class ContactMessageEntity
+{
+    public long      Id        { get; set; }
+    public string    Name      { get; set; } = "";
+    public string    Email     { get; set; } = "";
+    public string?   Phone     { get; set; }
+    public string    Subject   { get; set; } = "";
+    public string    Message   { get; set; } = "";
+    public bool      IsRead    { get; set; }
+    public DateTime  CreatedAt { get; set; } = DateTime.UtcNow;
+    public string?   Ip        { get; set; }              // for abuse triage only
+}
+
 // ── DbContext ─────────────────────────────────────────────────────────────
 public class AppDbContext : IdentityDbContext<AppUser>
 {
@@ -151,6 +168,7 @@ public class AppDbContext : IdentityDbContext<AppUser>
     public DbSet<DeviceEventEntity>    DeviceEvents    => Set<DeviceEventEntity>();
     public DbSet<AuditLogEntity>       AuditLogs       => Set<AuditLogEntity>();
     public DbSet<FeatureFlagEntity>    FeatureFlags    => Set<FeatureFlagEntity>();
+    public DbSet<ContactMessageEntity> ContactMessages => Set<ContactMessageEntity>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -180,6 +198,14 @@ public class AppDbContext : IdentityDbContext<AppUser>
         {
             e.ToTable("agent_templates");
             e.HasKey(t => t.Id);
+        });
+
+        b.Entity<ContactMessageEntity>(e =>  // standalone — public submissions
+        {
+            e.ToTable("contact_messages");
+            e.HasKey(m => m.Id);
+            e.HasIndex(m => m.CreatedAt);
+            e.HasIndex(m => m.IsRead);
         });
 
         b.Entity<AgentEntity>(e =>

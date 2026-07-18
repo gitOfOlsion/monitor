@@ -270,6 +270,31 @@ public record DemoInfoDto(
     int      DaysLeft
 );
 
+// ── Contact form ────────────────────────────────────────────────────────────
+public record ContactSubmitRequest(
+    string  Name,
+    string  Email,
+    string? Phone,
+    string  Subject,
+    string  Message,
+    string  CaptchaToken,
+    string  CaptchaAnswer,
+    string? Website = null      // honeypot: must stay empty (bots fill it in)
+);
+
+public class ContactMessageDto
+{
+    public long     Id        { get; set; }
+    public string   Name      { get; set; } = "";
+    public string   Email     { get; set; } = "";
+    public string?  Phone     { get; set; }
+    public string   Subject   { get; set; } = "";
+    public string   Message   { get; set; } = "";
+    public bool     IsRead    { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public string?  Ip        { get; set; }
+}
+
 // ── Auth DTOs (Web <-> Server) ────────────────────────────────────────────
 public record ValidateLoginRequest(string UserName, string Password);
 

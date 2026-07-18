@@ -796,6 +796,71 @@ public class CategoriesController : ScopedController
     [HttpGet] public async Task<IActionResult> GetAll() => Ok(await _svc.GetCategoriesAsync());
 }
 
+// ── Contact form (public submit; SuperAdmin-only inbox) ─────────────────────
+[ApiController, Route("api/contact"), AllowAnonymous]
+public class ContactController : ScopedController
+{
+    private readonly ContactService _contact;
+    private readonly CaptchaService _captcha;
+    public ContactController(ContactService contact, CaptchaService captcha)
+    { _contact = contact; _captcha = captcha; }
+
+    /// <summary>Public: submit a contact message (CAPTCHA + honeypot protected).</summary>
+    [HttpPost]
+    public async Task<IActionResult> Submit([FromBody] ContactSubmitRequest req)
+    {
+        // Honeypot: a real person never sees or fills this field.
+        if (!string.IsNullOrWhiteSpace(req.Website))
+            return Ok(new { message = "Thanks — your message has been sent." }); // silently drop
+
+        if (!_captcha.Validate(req.CaptchaToken, req.CaptchaAnswer))
+            return BadRequest(new { error = "Incorrect answer to the verification question. Please try again." });
+
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var (ok, error) = await _contact.SubmitAsync(req, ip);
+        if (!ok) return BadRequest(new { error });
+        return Ok(new { message = "Thanks — your message has been sent." });
+    }
+
+    /// <summary>SuperAdmin: all contact messages, newest first.</summary>
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
+    {
+        if (!Caller().IsSuperAdmin) return Forbid();
+        return Ok(await _contact.GetAllAsync());
+    }
+
+    /// <summary>SuperAdmin: count of unread messages (drives the nav badge).</summary>
+    [HttpGet("unread-count")]
+    public async Task<IActionResult> UnreadCount()
+    {
+        if (!Caller().IsSuperAdmin) return Forbid();
+        return Ok(new { count = await _contact.GetUnreadCountAsync() });
+    }
+
+    /// <summary>SuperAdmin: mark a message read/unread.</summary>
+    [HttpPut("{id:long}/read")]
+    public async Task<IActionResult> SetRead(long id, [FromBody] SetReadRequest req)
+    {
+        if (!Caller().IsSuperAdmin) return Forbid();
+        return await _contact.SetReadAsync(id, req.Read)
+            ? Ok(new { ok = true })
+            : NotFound(new { error = "Message not found" });
+    }
+
+    /// <summary>SuperAdmin: delete a message.</summary>
+    [HttpDelete("{id:long}")]
+    public async Task<IActionResult> Delete(long id)
+    {
+        if (!Caller().IsSuperAdmin) return Forbid();
+        return await _contact.DeleteAsync(id)
+            ? Ok(new { ok = true })
+            : NotFound(new { error = "Message not found" });
+    }
+
+    public record SetReadRequest(bool Read);
+}
+
 // ── Agent package downloads ────────────────────────────────────────────────
 [ApiController, Route("api/download"), AllowAnonymous]
 public class DownloadController : ScopedController
