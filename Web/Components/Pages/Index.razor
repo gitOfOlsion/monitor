@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Authorization
 @attribute [AllowAnonymous]
 @inject NavigationManager Nav
+@inject ServerApiClient Api
 
 <PageTitle>Peripheral Monitor — Centralised device visibility</PageTitle>
 
@@ -14,7 +15,10 @@
             <span class="pm-landing-logo">📡</span>
             <span>Peripheral Monitor</span>
         </div>
-        <a href="/demo" class="pm-btn pm-btn-primary pm-btn-sm">🚀 Try a demo</a>
+        <div class="pm-landing-nav-actions">
+            <a href="#contact" class="pm-landing-nav-link">Contact</a>
+            <a href="/demo" class="pm-btn pm-btn-primary pm-btn-sm">🚀 Try a demo</a>
+        </div>
     </header>
 
     <!-- Hero -->
@@ -68,6 +72,83 @@
         </div>
     </section>
 
+    <!-- Contact -->
+    <section class="pm-contact" id="contact">
+        <div class="pm-contact-inner">
+            <div class="pm-contact-intro">
+                <h2>Get in touch</h2>
+                <p>
+                    Questions about deployment, pricing, or whether Peripheral Monitor fits your
+                    institution? Send a message and we'll get back to you.
+                </p>
+                <ul class="pm-contact-points">
+                    <li>💬 Tell us about your setup and we'll advise</li>
+                    <li>🚀 Or <a href="/demo">start a free demo</a> right now</li>
+                </ul>
+            </div>
+
+            <div class="pm-contact-form">
+                @if (_sent)
+                {
+                    <div class="pm-alert pm-alert-success">
+                        ✅ Thanks, @_name — your message has been sent. We'll reply to <strong>@_email</strong>.
+                    </div>
+                    <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="ResetForm">Send another message</button>
+                }
+                else
+                {
+                    @if (_error != null)
+                    { <div class="pm-alert pm-alert-error">@_error</div> }
+
+                    <div class="pm-contact-row">
+                        <div class="pm-field">
+                            <label>Name</label>
+                            <input class="pm-input" @bind="_name" placeholder="Your name" />
+                        </div>
+                        <div class="pm-field">
+                            <label>Email</label>
+                            <input class="pm-input" type="email" @bind="_email" placeholder="you@example.com" />
+                        </div>
+                    </div>
+                    <div class="pm-contact-row">
+                        <div class="pm-field">
+                            <label>Phone number</label>
+                            <input class="pm-input" @bind="_phone" placeholder="+355 …" />
+                        </div>
+                        <div class="pm-field">
+                            <label>Subject</label>
+                            <input class="pm-input" @bind="_subject" placeholder="How can we help?" />
+                        </div>
+                    </div>
+                    <div class="pm-field">
+                        <label>Message</label>
+                        <textarea class="pm-input pm-textarea" rows="5" @bind="_message"
+                                  placeholder="Tell us a bit about what you need…"></textarea>
+                    </div>
+
+                    @* Honeypot — hidden from people, tempting to bots. Must stay empty. *@
+                    <div class="pm-hp" aria-hidden="true">
+                        <label>Website</label>
+                        <input class="pm-input" @bind="_website" tabindex="-1" autocomplete="off" />
+                    </div>
+
+                    <div class="pm-field">
+                        <label>Verification: @(_captcha?.Question ?? "loading…")</label>
+                        <div class="pm-contact-captcha">
+                            <input class="pm-input" @bind="_captchaAnswer" placeholder="your answer" />
+                            <button class="pm-btn pm-btn-secondary pm-btn-sm" type="button"
+                                    @onclick="RefreshCaptcha" title="New question">↻</button>
+                        </div>
+                    </div>
+
+                    <button class="pm-btn pm-btn-primary pm-btn-full" @onclick="SubmitAsync" disabled="@_sending">
+                        @(_sending ? "Sending…" : "Send message")
+                    </button>
+                }
+            </div>
+        </div>
+    </section>
+
     <footer class="pm-landing-footer">
         © @DateTime.UtcNow.Year Peripheral Monitor · All rights reserved
     </footer>
@@ -78,6 +159,50 @@
     private Service? _current => _services.FirstOrDefault(s => s.Key == _selected);
 
     private void Select(string key) => _selected = key;
+
+    // ── Contact form ─────────────────────────────────────────────────────────
+    private string _name = "", _email = "", _phone = "", _subject = "", _message = "";
+    private string _captchaAnswer = "", _website = "";   // _website = honeypot
+    private CaptchaChallengeDto? _captcha;
+    private bool _sending, _sent;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync() => await RefreshCaptcha();
+
+    private async Task RefreshCaptcha()
+    {
+        _captchaAnswer = "";
+        try { _captcha = await Api.GetCaptchaAsync(); } catch { _captcha = null; }
+    }
+
+    private void ResetForm()
+    {
+        _sent = false; _error = null;
+        _name = _email = _phone = _subject = _message = "";
+        _ = RefreshCaptcha();
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_name) || string.IsNullOrWhiteSpace(_email)
+            || string.IsNullOrWhiteSpace(_subject) || string.IsNullOrWhiteSpace(_message))
+        { _error = "Please fill in name, email, subject and message."; return; }
+        if (_captcha == null) { _error = "Verification failed to load — please refresh the page."; return; }
+
+        _sending = true;
+        var req = new ContactSubmitRequest(_name, _email, _phone, _subject, _message,
+                                           _captcha.Token, _captchaAnswer, _website);
+        var (ok, error) = await Api.ContactSubmitAsync(req);
+        _sending = false;
+
+        if (ok) { _sent = true; }
+        else
+        {
+            _error = error;
+            await RefreshCaptcha();   // fresh challenge after a failed attempt
+        }
+    }
 
     private record Service(string Key, string Icon, string Title, string Description, string[] Points, string Svg);
 

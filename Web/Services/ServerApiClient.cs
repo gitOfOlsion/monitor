@@ -55,6 +55,44 @@ public class ServerApiClient
         return (false, err?.Error ?? "Demo signup failed");
     }
 
+    // ── Contact form ─────────────────────────────────────────────────────────
+    public async Task<(bool ok, string? error)> ContactSubmitAsync(ContactSubmitRequest req)
+    {
+        var r = await _http.PostAsJsonAsync("/api/contact", req);
+        if (r.IsSuccessStatusCode) return (true, null);
+        var err = await r.Content.ReadFromJsonAsync<ErrorResponse>();
+        return (false, err?.Error ?? "Could not send your message. Please try again.");
+    }
+
+    public Task<List<ContactMessageDto>?> GetContactMessagesAsync()
+    { AttachIdentity(); return _http.GetFromJsonAsync<List<ContactMessageDto>>("/api/contact"); }
+
+    public async Task<int> GetContactUnreadCountAsync()
+    {
+        AttachIdentity();
+        try
+        {
+            var r = await _http.GetFromJsonAsync<UnreadCountResponse>("/api/contact/unread-count");
+            return r?.Count ?? 0;
+        }
+        catch { return 0; }
+    }
+
+    public async Task<bool> SetContactReadAsync(long id, bool read)
+    {
+        AttachIdentity();
+        var r = await _http.PutAsJsonAsync($"/api/contact/{id}/read", new { Read = read });
+        return r.IsSuccessStatusCode;
+    }
+
+    public async Task<bool> DeleteContactMessageAsync(long id)
+    {
+        AttachIdentity();
+        var r = await _http.DeleteAsync($"/api/contact/{id}");
+        return r.IsSuccessStatusCode;
+    }
+    private sealed class UnreadCountResponse { public int Count { get; set; } }
+
     public async Task<(bool ok, string? error)> SetSubgroupAsync(Guid agentId, string? subgroup)
     {
         AttachIdentity();

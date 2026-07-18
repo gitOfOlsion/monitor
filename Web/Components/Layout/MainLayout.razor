@@ -77,6 +77,15 @@
                                 <span class="pm-nav-icon">📜</span> Audit Log
                             </NavLink>
                         </li>
+                        <AuthorizeView Roles="SuperAdmin" Context="msgAuth">
+                            <li>
+                                <NavLink href="/messages">
+                                    <span class="pm-nav-icon">✉️</span> Messages
+                                    @if (_unreadMessages > 0)
+                                    { <span class="pm-nav-badge">@_unreadMessages</span> }
+                                </NavLink>
+                            </li>
+                        </AuthorizeView>
                     </AuthorizeView>
 
                     <!-- Institution access: SuperAdmin sees all, InstitutionAdmin sees their own -->
@@ -117,6 +126,7 @@
 @code {
     private bool _reportsEnabled;
     private bool _sidebarOpen;
+    private int  _unreadMessages;
 
     private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
     private void CloseSidebar()  => _sidebarOpen = false;
@@ -145,5 +155,8 @@
             _reportsEnabled = mine?.FirstOrDefault(f => f.Key == "reports")?.Effective ?? false;
         }
         catch { _reportsEnabled = false; }
+
+        // Unread contact-message badge (SuperAdmin only; returns 0 for everyone else).
+        _unreadMessages = await Api.GetContactUnreadCountAsync();
     }
 }
