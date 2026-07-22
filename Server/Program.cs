@@ -68,7 +68,9 @@ try
     builder.Services.AddSignalR(o =>
     {
         o.EnableDetailedErrors = builder.Environment.IsDevelopment();
-        o.MaximumReceiveMessageSize = 512 * 1024;
+        // File transfers travel as Base64 inside a hub message. The agent caps files
+        // at 50 MB; Base64 inflates that by ~33% (~67 MB), so allow 72 MB of headroom.
+        o.MaximumReceiveMessageSize = 72L * 1024 * 1024;
         o.KeepAliveInterval = TimeSpan.FromSeconds(15);
     });
     builder.Services.AddCors(o => o.AddPolicy("Dev", p =>

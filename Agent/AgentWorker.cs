@@ -630,6 +630,11 @@ public class AgentWorker : BackgroundService
             })
             .WithAutomaticReconnect(new[] { TimeSpan.Zero, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30) })
             .Build();
+        // Allow large inbound messages: PushFile delivers file bytes as Base64 inside a
+        // hub message (server caps files at 50 MB → ~67 MB Base64). The client default
+        // receive limit is small, so raise it to 72 MB to match the server.
+        _hub.ServerTimeout = TimeSpan.FromSeconds(120);
+        try { _hub.HandshakeTimeout = TimeSpan.FromSeconds(30); } catch { }
         _hub.Closed      += ex => { _log.LogWarning("Hub closed: {M}", ex?.Message); return Task.CompletedTask; };
         _hub.Reconnected += id => { _log.LogInformation("Hub reconnected: {Id}", id); return Task.CompletedTask; };
 
