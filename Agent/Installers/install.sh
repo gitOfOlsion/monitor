@@ -327,7 +327,11 @@ if ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d
         systemctl enable ssh 2>/dev/null || systemctl enable openssh-server 2>/dev/null || true
         systemctl start  ssh 2>/dev/null || systemctl start  openssh-server 2>/dev/null || true
     fi
-    ok "SSH enabled for headless remote access via Guacamole"
+    if systemctl is-enabled ssh &>/dev/null || systemctl is-enabled sshd &>/dev/null; then
+        ok "SSH enabled for headless remote access via Guacamole"
+    else
+        warn "SSH server not installed - install openssh-server to allow remote terminal access"
+    fi
 else
     # Desktop machine — install x11vnc for Guacamole VNC access
     echo "    Desktop environment detected — setting up VNC (x11vnc)..."
