@@ -23,10 +23,14 @@
        Upgrade a library → change the number here → all projects get it.
   ──────────────────────────────────────────────────────────────────────── -->
   <PropertyGroup>
-    <!-- ASP.NET Core / EF Core / Extensions — track .NET major -->
-    <AspNetCoreVersion>$(DotNetVersion).0</AspNetCoreVersion>
-    <EfCoreVersion>$(DotNetVersion).0</EfCoreVersion>
-    <ExtensionsVersion>$(DotNetVersion).0</ExtensionsVersion>
+    <!-- ASP.NET Core / EF Core / Extensions — track .NET major + latest patch.
+         Keep the patch current: x.0.0 releases have since-fixed security advisories
+         (e.g. SignalR.Common GHSA-334f-vvp4-7g6p, Cryptography.Pkcs GHSA-846f-f764-76mx).
+         Check with "dotnet list package" plus the vulnerable and include-transitive flags. -->
+    <DotNetPatchVersion>14</DotNetPatchVersion>
+    <AspNetCoreVersion>$(DotNetVersion).$(DotNetPatchVersion)</AspNetCoreVersion>
+    <EfCoreVersion>$(DotNetVersion).$(DotNetPatchVersion)</EfCoreVersion>
+    <ExtensionsVersion>$(DotNetVersion).$(DotNetPatchVersion)</ExtensionsVersion>
 
     <!-- Npgsql — major must match EF Core major (9→9.x, 10→10.x) -->
     <NpgsqlEfVersion>10.0.0</NpgsqlEfVersion>

@@ -890,11 +890,68 @@ public class DownloadController : ScopedController
             $"peripheral-monitor-agent-{inst.Slug}-{platform}.zip");
     }
 
+    /// <summary>
+    /// One-file Windows installer for this institution: double-click, accept UAC, done.
+    /// Streams the stock agent exe and appends the institution's config, so each
+    /// download is personalised without rebuilding anything.
+    /// </summary>
+    [HttpGet("{institutionId:guid}/windows-installer")]
+    public async Task DownloadWindowsInstaller(Guid institutionId, CancellationToken ct)
+    {
+        var inst = await _agents.GetInstitutionAsync(institutionId);
+        if (inst == null) { Response.StatusCode = StatusCodes.Status404NotFound; return; }
+        if (!_packages.IsWindowsInstallerAvailable())
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            await Response.WriteAsJsonAsync(new { error = "The Windows agent is not built yet." }, ct);
+            return;
+        }
+
+        var serverUrl = _config["PublicUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        var (exePath, trailer) = _packages.GetWindowsInstaller(institutionId, serverUrl);
+
+        await using var exe = new FileStream(exePath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                             bufferSize: 81920, useAsync: true);
+        Response.ContentType   = "application/vnd.microsoft.portable-executable";
+        Response.ContentLength = exe.Length + trailer.Length;
+        Response.Headers.ContentDisposition =
+            new System.Net.Mime.ContentDisposition { FileName = $"PeripheralMonitorAgent-Setup-{inst.Slug}.exe" }.ToString();
+        Response.Headers.CacheControl = "no-store"; // contains an enrolment token
+        await exe.CopyToAsync(Response.Body, ct);
+        await Response.Body.WriteAsync(trailer, ct);
+    }
+
+    /// <summary>
+    /// One-file Linux installer for this institution: <c>sudo sh &lt;file&gt;.run</c>.
+    /// A shell header followed by a .tar.gz, generated and streamed on the fly.
+    /// </summary>
+    [HttpGet("{institutionId:guid}/linux-installer")]
+    public async Task DownloadLinuxInstaller(Guid institutionId, CancellationToken ct)
+    {
+        var inst = await _agents.GetInstitutionAsync(institutionId);
+        if (inst == null) { Response.StatusCode = StatusCodes.Status404NotFound; return; }
+        if (!_packages.IsLinuxInstallerAvailable())
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            await Response.WriteAsJsonAsync(new { error = "The Linux agent is not built yet." }, ct);
+            return;
+        }
+
+        var serverUrl = _config["PublicUrl"] ?? $"{Request.Scheme}://{Request.Host}";
+        Response.ContentType = "application/octet-stream";
+        Response.Headers.ContentDisposition =
+            new System.Net.Mime.ContentDisposition { FileName = $"PeripheralMonitorAgent-Setup-{inst.Slug}.run" }.ToString();
+        Response.Headers.CacheControl = "no-store"; // contains an enrolment token
+        await _packages.WriteLinuxInstallerAsync(Response.Body, institutionId, serverUrl, ct);
+    }
+
     [HttpGet("platforms")]
     public IActionResult GetPlatforms() => Ok(new
     {
-        windows = _packages.IsPackageAvailable("windows"),
-        linux   = _packages.IsPackageAvailable("linux")
+        windows          = _packages.IsPackageAvailable("windows"),
+        windowsInstaller = _packages.IsWindowsInstallerAvailable(),
+        linux            = _packages.IsPackageAvailable("linux"),
+        linuxInstaller   = _packages.IsLinuxInstallerAvailable()
     });
 
 }

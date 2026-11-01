@@ -2,14 +2,18 @@
 # ═══════════════════════════════════════════════════════════════════════════
 # Peripheral Monitor Agent — Automated Linux Installer
 # ═══════════════════════════════════════════════════════════════════════════
-# - Checks/installs .NET 10 Runtime
 # - Creates a dedicated service account (pm-agent)
-# - Installs the agent to /opt/peripheral-monitor
+# - Installs the agent to /opt/peripheral-monitor (self-contained: no .NET needed)
 # - Configures udev rules for real-time USB/input events
 # - Registers and starts as a systemd service
 # - Auto-starts after boot
 #
-# Usage: sudo bash install.sh
+# Usage: sudo bash install.sh [--dry-run]          install or upgrade in place
+#        sudo bash install.sh --uninstall [--purge] remove (--purge also deletes event history)
+#        sudo bash /opt/peripheral-monitor/uninstall.sh [--purge]
+#
+# Usually run for you by the one-file installer downloaded from the dashboard:
+#        sudo sh PeripheralMonitorAgent-Setup-<institution>.run
 # ═══════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -17,9 +21,23 @@ set -euo pipefail
 INSTALL_DIR="/opt/peripheral-monitor"
 SERVICE_USER="pm-agent"
 SERVICE_NAME="peripheral-monitor-agent"
-DOTNET_VERSION="10.0"
-DOTNET_MAJOR="${DOTNET_VERSION%%.*}"
 UDEV_PIPE_DIR="/run/peripheral-monitor"
+# Event history (EventStore). Created by systemd via StateDirectory= in the unit below.
+STATE_DIR="/var/lib/peripheralmonitor"
+
+DRY_RUN=false
+UNINSTALL=false
+PURGE=false
+[[ "$(basename "$0")" == "uninstall.sh" ]] && UNINSTALL=true
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run)   DRY_RUN=true ;;
+        --uninstall) UNINSTALL=true ;;
+        --purge)     PURGE=true ;;
+        --quiet)     ;;   # accepted for symmetry with Windows; this script never prompts
+        *) echo "Unknown option: $arg" >&2; exit 2 ;;
+    esac
+done
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -43,11 +61,65 @@ echo "════════════════════════�
 echo "  Peripheral Monitor Agent — Linux Installer"
 echo "═══════════════════════════════════════════════════"
 
+if [[ "$DRY_RUN" == true ]]; then
+    step "Dry run — nothing will be changed"
+    if [[ -f "$SCRIPT_DIR/appsettings.local.json" ]]; then
+        ok "Server: $(grep -o '"SignalRUrl"[^,}]*' "$SCRIPT_DIR/appsettings.local.json" | cut -d'"' -f4)"
+    else
+        warn "No appsettings.local.json next to this script — an existing install keeps its config"
+    fi
+    [[ -f "$SCRIPT_DIR/PeripheralMonitor.Agent" ]] && ok "Agent binary present" || fail "Agent binary missing"
+    command -v systemctl &>/dev/null && ok "systemd found" || fail "systemd not found (required)"
+    echo "    Would: create user $SERVICE_USER, install to $INSTALL_DIR, add udev rules,"
+    echo "    register $SERVICE_NAME.service, set up VNC (127.0.0.1 only) or SSH, and start it."
+    exit 0
+fi
+
 if [[ $EUID -ne 0 ]]; then
     fail "This script must be run as root (sudo bash install.sh)"
     exit 1
 fi
 ok "Running as root"
+
+if ! command -v systemctl &>/dev/null; then
+    fail "systemd is required (systemctl not found)"
+    exit 1
+fi
+
+# ── Uninstall ──────────────────────────────────────────────────────────────
+if [[ "$UNINSTALL" == true ]]; then
+    step "Uninstalling Peripheral Monitor Agent..."
+    for unit in "$SERVICE_NAME" pm-x11vnc; do
+        systemctl disable --now "$unit.service" 2>/dev/null || true
+        rm -f "/etc/systemd/system/$unit.service"
+    done
+    systemctl daemon-reload
+    ok "Services stopped and removed"
+
+    rm -f /etc/udev/rules.d/99-peripheral-monitor.rules
+    udevadm control --reload-rules 2>/dev/null || true
+    rm -f /etc/tmpfiles.d/peripheral-monitor.conf /etc/sudoers.d/peripheral-monitor
+    rm -rf "$UDEV_PIPE_DIR"
+    ok "udev rule, tmpfiles entry and sudoers rule removed"
+
+    rm -rf "$INSTALL_DIR"
+    ok "$INSTALL_DIR removed"
+
+    if id "$SERVICE_USER" &>/dev/null; then
+        userdel "$SERVICE_USER" 2>/dev/null && ok "User $SERVICE_USER removed" || warn "Could not remove user $SERVICE_USER"
+    fi
+
+    if [[ "$PURGE" == true ]]; then
+        rm -rf "$STATE_DIR"
+        ok "Event history deleted ($STATE_DIR)"
+    else
+        echo "    Event history kept in $STATE_DIR (re-run with --purge to delete it)"
+    fi
+    echo "    Left in place: SSH and the x11vnc package, in case you use them for other things."
+    echo ""
+    ok "Uninstall complete"
+    exit 0
+fi
 
 # Detect package manager
 if command -v apt-get &>/dev/null; then
@@ -64,75 +136,22 @@ fi
 ok "Package manager: $PKG_MGR"
 
 # ══════════════════════════════════════════════════════════════════════════
-# STEP 1: Check/Install .NET Runtime
+# STEP 1: Check agent binary / stop running agent
 # ══════════════════════════════════════════════════════════════════════════
 
-step "Checking .NET Runtime..."
-
-dotnet_ok=false
-if command -v dotnet &>/dev/null; then
-    INSTALLED=$(dotnet --list-runtimes 2>/dev/null | grep "Microsoft.NETCore.App" | grep -oP '\d+' | head -1 || true)
-    if [[ -n "$INSTALLED" ]] && [[ "$INSTALLED" -ge "$DOTNET_MAJOR" ]]; then
-        ok ".NET ${INSTALLED}.x runtime found"
-        dotnet_ok=true
-    fi
+# The agent is published self-contained (see Server/Dockerfile), so it carries its
+# own .NET runtime. Nothing to download here — the install also works offline.
+step "Checking agent binary..."
+if [[ ! -f "$SCRIPT_DIR/PeripheralMonitor.Agent" ]]; then
+    fail "PeripheralMonitor.Agent not found next to this script"
+    exit 1
 fi
+ok "Self-contained agent found (no .NET runtime needed)"
 
-if [[ "$dotnet_ok" == false ]]; then
-    warn ".NET $DOTNET_VERSION runtime not found — installing..."
-
-    case "$PKG_MGR" in
-        apt)
-            # Microsoft package repository
-            apt-get update -qq
-            apt-get install -y -qq wget apt-transport-https
-
-            # Add Microsoft package signing key and repo
-            wget -q "https://packages.microsoft.com/config/$(. /etc/os-release && echo "$ID/$VERSION_ID")/packages-microsoft-prod.deb" \
-                 -O /tmp/packages-microsoft-prod.deb 2>/dev/null || true
-
-            if [[ -f /tmp/packages-microsoft-prod.deb ]]; then
-                dpkg -i /tmp/packages-microsoft-prod.deb
-                rm -f /tmp/packages-microsoft-prod.deb
-                apt-get update -qq
-                apt-get install -y -qq "dotnet-runtime-${DOTNET_VERSION}" "aspnetcore-runtime-${DOTNET_VERSION}"
-            else
-                warn "Microsoft repo not available for this distro — using install script"
-                wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
-                bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime aspnetcore --install-dir /usr/share/dotnet
-                bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime dotnet     --install-dir /usr/share/dotnet
-                ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
-                rm -f /tmp/dotnet-install.sh
-            fi
-            ;;
-        dnf|yum)
-            $PKG_MGR install -y -q "dotnet-runtime-${DOTNET_VERSION}" "aspnetcore-runtime-${DOTNET_VERSION}" 2>/dev/null || {
-                warn "Package not available — using install script"
-                wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
-                bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime aspnetcore --install-dir /usr/share/dotnet
-                bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime dotnet     --install-dir /usr/share/dotnet
-                ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
-                rm -f /tmp/dotnet-install.sh
-            }
-            ;;
-        *)
-            warn "Unknown package manager — using .NET install script"
-            wget -q https://dot.net/v1/dotnet-install.sh -O /tmp/dotnet-install.sh
-            bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime aspnetcore --install-dir /usr/share/dotnet
-            bash /tmp/dotnet-install.sh --channel "$DOTNET_VERSION" --runtime dotnet     --install-dir /usr/share/dotnet
-            ln -sf /usr/share/dotnet/dotnet /usr/local/bin/dotnet
-            rm -f /tmp/dotnet-install.sh
-            ;;
-    esac
-
-    # Verify installation
-    if command -v dotnet &>/dev/null; then
-        ok ".NET runtime installed: $(dotnet --version 2>/dev/null || echo 'unknown')"
-    else
-        fail ".NET installation failed"
-        echo "    Download manually: https://dotnet.microsoft.com/download/dotnet/$DOTNET_VERSION"
-        exit 1
-    fi
+# Stop a running agent before replacing its binary (upgrade in place)
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    systemctl stop "$SERVICE_NAME"
+    ok "Stopped running agent for upgrade"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -178,17 +197,22 @@ step "Installing agent to $INSTALL_DIR..."
 
 mkdir -p "$INSTALL_DIR"/{logs,data}
 
-# Copy agent files (everything in same directory as this script, except installers)
-find "$SCRIPT_DIR" -maxdepth 1 \
+# Copy agent files (everything in same directory as this script, except installers).
+# -mindepth 1: without it find also lists $SCRIPT_DIR itself, which copied the whole
+# folder into a subfolder of $INSTALL_DIR.
+find "$SCRIPT_DIR" -mindepth 1 -maxdepth 1 \
     ! -name "install.ps1" \
     ! -name "install.sh" \
+    ! -name "uninstall.sh" \
     ! -name "*.service" \
     ! -name "*.rules" \
-    ! -name "." \
     -exec cp -r {} "$INSTALL_DIR/" \;
 
 # Make the main binary executable
 chmod +x "$INSTALL_DIR/PeripheralMonitor.Agent" 2>/dev/null || true
+
+# Keep a copy of this script as the uninstaller
+cp "$SCRIPT_DIR/install.sh" "$INSTALL_DIR/uninstall.sh"
 
 ok "Agent files installed to $INSTALL_DIR"
 
@@ -202,6 +226,9 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 chmod -R 750 "$INSTALL_DIR"
 # Config files should be readable only by service user
 chmod 640 "$INSTALL_DIR"/appsettings*.json 2>/dev/null || true
+# The uninstaller runs as root and must not be editable by the service account
+chown root:root "$INSTALL_DIR/uninstall.sh"
+chmod 700 "$INSTALL_DIR/uninstall.sh"
 
 ok "Owner: $SERVICE_USER, mode: 750"
 
@@ -264,6 +291,11 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=$INSTALL_DIR/logs $INSTALL_DIR/data $UDEV_PIPE_DIR
 PrivateTmp=true
+# Event history lives in $STATE_DIR. systemd creates it, owned by $SERVICE_USER, and
+# makes it writable despite ProtectSystem=strict. Without this the agent could not
+# create the folder, so the durable event history never worked on Linux.
+StateDirectory=peripheralmonitor
+StateDirectoryMode=0750
 
 # Logging → journald (also goes to agent's own log files via Serilog)
 StandardOutput=journal
@@ -295,7 +327,11 @@ if ! command -v Xorg &>/dev/null && ! command -v Xwayland &>/dev/null && [[ ! -d
         systemctl enable ssh 2>/dev/null || systemctl enable openssh-server 2>/dev/null || true
         systemctl start  ssh 2>/dev/null || systemctl start  openssh-server 2>/dev/null || true
     fi
-    ok "SSH enabled for headless remote access via Guacamole"
+    if systemctl is-enabled ssh &>/dev/null || systemctl is-enabled sshd &>/dev/null; then
+        ok "SSH enabled for headless remote access via Guacamole"
+    else
+        warn "SSH server not installed - install openssh-server to allow remote terminal access"
+    fi
 else
     # Desktop machine — install x11vnc for Guacamole VNC access
     echo "    Desktop environment detected — setting up VNC (x11vnc)..."
@@ -313,7 +349,10 @@ else
     esac
 
     if command -v x11vnc &>/dev/null; then
-        # Create systemd service for x11vnc that starts when a display is available
+        # Create systemd service for x11vnc that starts when a display is available.
+        # SECURITY: -localhost binds VNC to 127.0.0.1 only. The agent's tunnel connects
+        # locally, so nothing on the network ever needs to reach port 5900. Without it,
+        # anyone on the LAN could take over the desktop (x11vnc has no password here).
         cat > /etc/systemd/system/pm-x11vnc.service << VNCSERVICE
 [Unit]
 Description=Peripheral Monitor x11vnc (VNC for Guacamole)
@@ -322,7 +361,7 @@ Wants=display-manager.service
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/x11vnc -display :0 -auth guess -forever -loop -noxdamage -repeat -rfbport 5900 -shared -capslock
+ExecStart=/usr/bin/x11vnc -localhost -display :0 -auth guess -forever -loop -noxdamage -repeat -rfbport 5900 -shared -capslock
 Restart=on-failure
 RestartSec=5
 
@@ -331,8 +370,9 @@ WantedBy=multi-user.target
 VNCSERVICE
         systemctl daemon-reload
         systemctl enable pm-x11vnc.service 2>/dev/null || true
-        systemctl start  pm-x11vnc.service 2>/dev/null || true
-        ok "x11vnc VNC service enabled (port 5900)"
+        # restart (not start) so a re-install replaces an older, network-exposed instance
+        systemctl restart pm-x11vnc.service 2>/dev/null || true
+        ok "x11vnc VNC service enabled (127.0.0.1:5900 only)"
     fi
 fi
 
@@ -371,12 +411,12 @@ echo "  Service user:  $SERVICE_USER"
 echo "  Logs:          $INSTALL_DIR/logs/"
 echo "  Config:        $INSTALL_DIR/appsettings.local.json"
 echo "  udev rules:    /etc/udev/rules.d/99-peripheral-monitor.rules"
-echo "  Remote desktop: RDP enabled for web-based remote access via Guacamole"
+echo "  Remote desktop: VNC/SSH via the agent tunnel (VNC listens on 127.0.0.1 only)"
 echo ""
 echo "  Manage:"
 echo "    Status:  systemctl status $SERVICE_NAME"
 echo "    Logs:    journalctl -u $SERVICE_NAME -f"
 echo "    Stop:    systemctl stop $SERVICE_NAME"
 echo "    Start:   systemctl start $SERVICE_NAME"
-echo "    Remove:  systemctl disable --now $SERVICE_NAME && rm /etc/systemd/system/${SERVICE_NAME}.service"
+echo "    Remove:  sudo bash $INSTALL_DIR/uninstall.sh   (add --purge to delete event history)"
 echo ""

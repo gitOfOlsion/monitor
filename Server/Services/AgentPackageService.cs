@@ -1,4 +1,7 @@
+using System.Formats.Tar;
 using System.IO.Compression;
+using System.Text;
+using PeripheralMonitor.Shared.Models;
 using PeripheralMonitor.Shared.Security;
 
 namespace PeripheralMonitor.Server.Services;
@@ -22,6 +25,96 @@ public class AgentPackageService
         _logger = logger;
     }
 
+    /// <summary>Stock Windows agent exe that doubles as its own installer.</summary>
+    private static string WindowsExePath => Path.Combine(PackageBase, "windows", "PeripheralMonitor.Agent.exe");
+
+    public bool IsWindowsInstallerAvailable() => File.Exists(WindowsExePath);
+
+    /// <summary>
+    /// One-file Windows installer: the stock agent exe followed by this institution's
+    /// config (see <see cref="InstallerConfigTrailer"/>). Returns the exe path to stream
+    /// and the trailer to write after it, so nothing large is buffered in memory.
+    /// </summary>
+    public (string ExePath, byte[] Trailer) GetWindowsInstaller(Guid institutionId, string serverUrl)
+    {
+        if (!IsWindowsInstallerAvailable())
+            throw new InvalidOperationException($"Windows agent not found at {WindowsExePath}");
+        var trailer = InstallerConfigTrailer.Build(
+            new InstallerConfig($"{serverUrl.TrimEnd('/')}/monitor", ProvisionToken(institutionId)));
+        return (WindowsExePath, trailer);
+    }
+
+    // ── Linux one-file installer (.run) ───────────────────────────────────────────────
+
+    private static string LinuxDir         => Path.Combine(PackageBase, "linux");
+    private static string RunHeaderPath    => Path.Combine(PackageBase, "installers", "linux-run-header.sh");
+    private static string LinuxInstallPath => Path.Combine(PackageBase, "installers", "install.sh");
+
+    private const UnixFileMode Mode755 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
+                                       | UnixFileMode.GroupRead | UnixFileMode.GroupExecute
+                                       | UnixFileMode.OtherRead | UnixFileMode.OtherExecute;
+    private const UnixFileMode Mode644 = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                                       | UnixFileMode.GroupRead | UnixFileMode.OtherRead;
+    private const UnixFileMode Mode600 = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+
+    public bool IsLinuxInstallerAvailable() =>
+        Directory.Exists(LinuxDir) && File.Exists(RunHeaderPath) && File.Exists(LinuxInstallPath);
+
+    /// <summary>
+    /// Writes a self-extracting Linux installer to <paramref name="output"/>: the shell
+    /// header (linux-run-header.sh) followed by a .tar.gz of the agent, install.sh and
+    /// this institution's appsettings.local.json. Streamed straight to the response.
+    /// </summary>
+    public async Task WriteLinuxInstallerAsync(Stream output, Guid institutionId, string serverUrl, CancellationToken ct)
+    {
+        if (!IsLinuxInstallerAvailable())
+            throw new InvalidOperationException("Linux agent or installer scripts not found");
+
+        // Scripts must have LF line endings or sh/bash fail - normalise in case the
+        // repo was checked out on Windows with CRLF.
+        var header = Lf(await File.ReadAllTextAsync(RunHeaderPath, ct)).TrimEnd() + "\n";
+        if (!header.EndsWith("\n__PM_PAYLOAD_BELOW__\n", StringComparison.Ordinal))
+            throw new InvalidOperationException("linux-run-header.sh must end with the __PM_PAYLOAD_BELOW__ marker line");
+        await output.WriteAsync(Encoding.UTF8.GetBytes(header), ct);
+
+        await using var gz  = new GZipStream(output, CompressionLevel.Optimal, leaveOpen: true);
+        await using var tar = new TarWriter(gz, TarEntryFormat.Pax, leaveOpen: true);
+
+        foreach (var file in Directory.GetFiles(LinuxDir, "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetRelativePath(LinuxDir, file).Replace('\\', '/');
+            if (name.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase)) continue;  // debug symbols: not needed
+            await using var data = File.OpenRead(file);
+            var mode = name == "PeripheralMonitor.Agent" ? Mode755 : Mode644;
+            await tar.WriteEntryAsync(new PaxTarEntry(TarEntryType.RegularFile, name) { Mode = mode, DataStream = data }, ct);
+        }
+
+        var installSh = Lf(await File.ReadAllTextAsync(LinuxInstallPath, ct));
+        await WriteTextEntry(tar, "install.sh", installSh, Mode755, ct);
+
+        var settings = $$"""
+            {
+              "SignalRUrl": "{{serverUrl.TrimEnd('/')}}/monitor",
+              "JwtToken": "{{ProvisionToken(institutionId)}}"
+            }
+            """;
+        await WriteTextEntry(tar, "appsettings.local.json", settings, Mode600, ct);
+    }
+
+    private static async Task WriteTextEntry(TarWriter tar, string name, string text, UnixFileMode mode, CancellationToken ct)
+    {
+        using var data = new MemoryStream(Encoding.UTF8.GetBytes(text));
+        await tar.WriteEntryAsync(new PaxTarEntry(TarEntryType.RegularFile, name) { Mode = mode, DataStream = data }, ct);
+    }
+
+    private static string Lf(string s) => s.Replace("\r\n", "\n");
+
+    private string ProvisionToken(Guid institutionId)
+    {
+        var secret = _config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret not configured");
+        return JwtHelper.GenerateAgentToken("__PROVISIONED__", "__PENDING__", institutionId, secret);
+    }
+
     public byte[] BuildPackage(string platform, Guid institutionId, string serverUrl)
     {
         var platformDir = Path.Combine(PackageBase, platform);
@@ -29,8 +122,7 @@ public class AgentPackageService
             throw new InvalidOperationException($"Agent package not found for platform '{platform}'. Expected at: {platformDir}");
 
         // Generate JWT token for this institution
-        var secret = _config["Jwt:Secret"] ?? throw new InvalidOperationException("Jwt:Secret not configured");
-        var token  = JwtHelper.GenerateAgentToken("__PROVISIONED__", "__PENDING__", institutionId, secret);
+        var token = ProvisionToken(institutionId);
 
         using var ms  = new MemoryStream();
         using var zip = new ZipArchive(ms, ZipArchiveMode.Create, leaveOpen: true);
@@ -89,6 +181,13 @@ public class AgentPackageService
         if (!File.Exists(sourcePath)) return;
         var entry = zip.CreateEntry(entryName, CompressionLevel.Optimal);
         using var entryStream = entry.Open();
+        if (entryName.EndsWith(".sh", StringComparison.OrdinalIgnoreCase))
+        {
+            // bash refuses CRLF scripts; a Windows checkout produces CRLF
+            var lf = Encoding.UTF8.GetBytes(Lf(File.ReadAllText(sourcePath)));
+            entryStream.Write(lf);
+            return;
+        }
         using var fileStream  = File.OpenRead(sourcePath);
         fileStream.CopyTo(entryStream);
     }

@@ -1,8 +1,34 @@
+# .NET build output
 bin/
 obj/
-.vs/
+publish/
 *.user
+
+# IDEs / OS
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secrets and local config (never commit)
 .env
 appsettings.local.json
+appsettings.Development.json
+
+# Logs
 logs/
 *.log
+
+# Generated installers (built by the server at download time, never stored)
+*.run
+PeripheralMonitorAgent-Setup-*.exe
+peripheral-monitor-agent-*.zip
+
+# graphify knowledge graph (regenerate with /graphify)
+graphify-out/
+
+# Claude Code: personal settings and worktrees (shared .claude/ files can still be committed)
+.claude/settings.local.json
+.claude/*.lock
+.claude/worktrees/

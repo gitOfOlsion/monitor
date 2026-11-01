@@ -3,7 +3,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer"     Version="$(AspNetCoreVersion)" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="$(AspNetCoreVersion)" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"              Version="$(EfCoreVersion)" />
+    <!-- Design-time only (dotnet ef migrations). PrivateAssets keeps it and its MSBuild
+         dependencies out of the published server. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"              Version="$(EfCoreVersion)">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- EF Design pulls System.Security.Cryptography.Pkcs 9.0.0 (GHSA-846f-f764-76mx, high;
+         GHSA-2fmv-rv2c-59x7, moderate). Pin the patched version. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs"                 Version="$(ExtensionsVersion)" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL"             Version="$(NpgsqlEfVersion)" />
     <PackageReference Include="Serilog.AspNetCore"                                Version="$(SerilogAspNetCoreVersion)" />
     <PackageReference Include="Serilog.Sinks.Seq"                                 Version="$(SerilogSeqVersion)" />
