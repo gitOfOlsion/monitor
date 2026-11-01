@@ -1,7 +1,13 @@
 using PeripheralMonitor.Agent;
 using PeripheralMonitor.Agent.Services;
+using PeripheralMonitor.Agent.Setup;
 using Serilog;
 using Serilog.Events;
+
+// Windows: the same exe is its own installer (double-click, or "install"/"uninstall").
+// Any other launch, including the service itself, falls through to the normal agent.
+if (OperatingSystem.IsWindows() && WindowsSetup.TryParse(args, out var setup))
+    return WindowsSetup.Run(setup);
 
 var exeDir = AppContext.BaseDirectory;
 Log.Logger = new LoggerConfiguration().MinimumLevel.Override("Microsoft", LogEventLevel.Warning)

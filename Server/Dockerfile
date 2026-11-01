@@ -20,12 +20,16 @@ RUN dotnet publish Server/PeripheralMonitor.Server.csproj \
     -c Release -o /app/publish
 
 # ── Stage 3: Build agent for Windows ──────────────────────────────────
+# The single-file exe is also the Windows installer: the server appends each
+# institution's config to it at download time (see AgentPackageService).
+# Compression roughly halves the download size.
 FROM restore AS build-agent-win
 COPY Shared/ Shared/
 COPY Agent/  Agent/
 RUN dotnet publish Agent/PeripheralMonitor.Agent.csproj \
     -c Release -r win-x64 --self-contained true \
     -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+    -p:EnableCompressionInSingleFile=true \
     -o /agent/windows
 
 # ── Stage 4: Build agent for Linux ───────────────────────────────────
@@ -52,6 +56,7 @@ COPY --from=build-agent-linux /agent/linux   /app/agent-packages/linux/
 COPY Agent/Installers/install.ps1 /app/agent-packages/installers/install.ps1
 COPY Agent/Installers/install.bat /app/agent-packages/installers/install.bat
 COPY Agent/Installers/install.sh  /app/agent-packages/installers/install.sh
+COPY Agent/Installers/linux-run-header.sh /app/agent-packages/installers/linux-run-header.sh
 
 
 EXPOSE 5000

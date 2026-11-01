@@ -2,8 +2,12 @@
 param(
     [string]$InstallPath  = "C:\PeripheralMonitor",
     [string]$ServiceName  = "PeripheralMonitorAgent",
-    [string]$ServiceUser  = "PeripheralMonitorSvc",
-    [string]$DotNetVersion = "10.0"
+    [string]$ServiceUser  = "PeripheralMonitorSvc",   # legacy account - removed if present
+    [string]$DotNetVersion = "10.0",
+    # Open the Windows Firewall "Remote Desktop" rule to the network. NOT needed for
+    # dashboard remote desktop (the agent tunnel connects to 127.0.0.1), so it is off
+    # by default. Only use this if you also want direct RDP from other LAN machines.
+    [switch]$AllowLanRdp
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,14 +17,18 @@ function Write-Ok($msg)   { Write-Host "    [OK] $msg" -ForegroundColor Green }
 function Write-Warn($msg) { Write-Host "    [WARN] $msg" -ForegroundColor Yellow }
 function Write-Fail($msg) { Write-Host "    [FAIL] $msg" -ForegroundColor Red }
 
-function New-RandomPassword {
-    param([int]$Length = 24)
-    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
-    $rng   = New-Object System.Security.Cryptography.RNGCryptoServiceProvider
-    $bytes = [byte[]]::new($Length)
-    $rng.GetBytes($bytes)
-    $rng.Dispose()
-    return -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
+# Restrict a folder (and everything in it) to SYSTEM + Administrators.
+# SIDs instead of names so it works on non-English Windows.
+function Lock-Folder($path) {
+    # 1. Administrators own everything (an owner can always rewrite permissions)
+    & icacls.exe $path /setowner '*S-1-5-32-544' /T /C /Q | Out-Null
+    # 2. Drop every explicit rule. Older installers turned the inherited
+    #    "Authenticated Users: Modify" into an explicit rule, which step 3 alone keeps.
+    & icacls.exe $path /reset /T /C /Q | Out-Null
+    # 3. Cut inheritance and allow only SYSTEM + Administrators; children inherit this.
+    & icacls.exe $path /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Could not set permissions on $path (icacls exit $LASTEXITCODE)"; return }
+    Write-Ok "Permissions set - only SYSTEM and Administrators can access $path"
 }
 
 # ======================================================================
@@ -96,66 +104,22 @@ if (-not $dotnetInstalled) {
 }
 
 # ======================================================================
-# STEP 2: Create service account
+# STEP 2: Remove legacy service account
 # ======================================================================
 
-Write-Step "Configuring service account '$ServiceUser'..."
-
-$password   = New-RandomPassword
-$securePass = ConvertTo-SecureString $password -AsPlainText -Force
-
-$userExists = Get-LocalUser -Name $ServiceUser -ErrorAction SilentlyContinue
-
-if (-not $userExists) {
-    New-LocalUser -Name $ServiceUser `
-                  -Password $securePass `
-                  -FullName 'Peripheral Monitor Service Account' `
-                  -Description 'Runs the Peripheral Monitor Agent service' `
-                  -PasswordNeverExpires `
-                  -UserMayNotChangePassword `
-                  -AccountNeverExpires | Out-Null
-    Write-Ok "Service account '$ServiceUser' created"
-} else {
-    Write-Ok "Service account '$ServiceUser' already exists - resetting password"
-    Set-LocalUser -Name $ServiceUser -Password $securePass
-}
-
-$script:svcPassword = $securePass
-
-# Add service account to Performance Monitor Users group - this grants WMI read access
-# to Win32_LogonSession and Win32_Process which are needed to detect the logged-in user.
-try {
-    Add-LocalGroupMember -Group "Performance Monitor Users" -Member $ServiceUser -ErrorAction SilentlyContinue
-    Write-Ok "Added '$ServiceUser' to Performance Monitor Users (WMI access for user detection)"
-} catch {
-    Write-Warn "Could not add to Performance Monitor Users: $_"
-}
-
-# Grant "Log on as a service" right
-Write-Step "Granting 'Log on as a service' right..."
-try {
-    $tempCfg = Join-Path $env:TEMP 'pm-secedit.cfg'
-    $tempDb  = Join-Path $env:TEMP 'pm-secedit.sdb'
-    secedit /export /cfg $tempCfg /quiet
-
-    $content = Get-Content $tempCfg -Raw
-    $sidObj  = (New-Object System.Security.Principal.NTAccount($ServiceUser)).Translate(
-                [System.Security.Principal.SecurityIdentifier])
-    $sid     = $sidObj.Value
-
-    if ($content -match 'SeServiceLogonRight\s*=\s*(.+)') {
-        $existing = $Matches[1]
-        $content  = $content -replace ('SeServiceLogonRight\s*=\s*.+'), "SeServiceLogonRight = *$sid,$existing"
-    } else {
-        $content += "`r`n[Privilege Rights]`r`nSeServiceLogonRight = *$sid"
+# The service runs as LocalSystem (see STEP 5), so no dedicated account is needed.
+# Older versions of this script created '$ServiceUser' with a password nobody knows
+# and never used it. Remove that leftover account so it can't be abused.
+Write-Step "Removing unused legacy service account '$ServiceUser' (if present)..."
+if (Get-LocalUser -Name $ServiceUser -ErrorAction SilentlyContinue) {
+    try {
+        Remove-LocalUser -Name $ServiceUser -ErrorAction Stop
+        Write-Ok "Legacy account '$ServiceUser' removed"
+    } catch {
+        Write-Warn "Could not remove '$ServiceUser': $_"
     }
-    $content | Set-Content $tempCfg
-    secedit /configure /db $tempDb /cfg $tempCfg /quiet
-    Remove-Item $tempCfg, $tempDb -ErrorAction SilentlyContinue
-    Write-Ok "'Log on as a service' granted to $ServiceUser"
-} catch {
-    Write-Warn "Could not grant SeServiceLogonRight automatically: $_"
-    Write-Host "    You may need to set this in Local Security Policy manually" -ForegroundColor Gray
+} else {
+    Write-Ok "No legacy account found"
 }
 
 # ======================================================================
@@ -184,14 +148,9 @@ if (-not (Test-Path $dataDir)) {
     $histInfo = if (Test-Path $hist) { " (existing history preserved: $((Get-Item $hist).Length) bytes)" } else { "" }
     Write-Ok "Persistent data dir $dataDir already exists$histInfo"
 }
-# Grant SYSTEM (the service account) full control of the data dir so it can write.
-try {
-    $dacl = Get-Acl $dataDir
-    $sysRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-        'NT AUTHORITY\SYSTEM', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-    $dacl.AddAccessRule($sysRule)
-    Set-Acl -Path $dataDir -AclObject $dacl
-} catch { Write-Warn "Could not set ACL on data dir: $_" }
+# SECURITY: the history holds device and logged-in-user data. ProgramData normally lets
+# every local user read subfolders, so restrict it to SYSTEM + Administrators.
+Lock-Folder $dataDir
 
 # ----------------------------------------------------------------------
 # CRITICAL: Stop the service BEFORE copying files. A running service holds
@@ -244,22 +203,11 @@ if (Test-Path $exeCheck) {
 
 Write-Step "Setting folder permissions..."
 
-$acl  = Get-Acl $InstallPath
-$acl.SetAccessRuleProtection($true, $true)
-# Service runs as LocalSystem, so grant SYSTEM full control (for logs/data writes).
-# Also grant Administrators so the install/uninstall can manage the folder.
-$ruleSystem = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    'NT AUTHORITY\SYSTEM', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-$ruleAdmin = New-Object System.Security.AccessControl.FileSystemAccessRule(
-    'BUILTIN\Administrators', 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
-$acl.AddAccessRule($ruleSystem)
-$acl.AddAccessRule($ruleAdmin)
-Set-Acl -Path $InstallPath -AclObject $acl
-
-Get-ChildItem $InstallPath -Recurse -Directory | ForEach-Object {
-    Set-Acl -Path $_.FullName -AclObject $acl
-}
-Write-Ok "Permissions set - SYSTEM has full control of $InstallPath"
+# SECURITY: a folder created under C:\ inherits "Authenticated Users: Modify" from the
+# drive root. The old code kept those inherited rules, so any signed-in user could
+# replace PeripheralMonitor.Agent.exe and have it run as SYSTEM, or edit the config to
+# point the agent at another server. Drop inheritance and allow SYSTEM + Administrators only.
+Lock-Folder $InstallPath
 
 # ======================================================================
 # STEP 5: Register Windows Service
@@ -315,11 +263,19 @@ try {
         -Name "fDenyTSConnections" -Value 0 -Type DWord
     Write-Ok "Remote Desktop enabled"
 
-    # Allow RDP through Windows Firewall
-    Enable-NetFirewallRule -DisplayGroup "Remote Desktop" -ErrorAction SilentlyContinue
-    # If the above fails (older Windows), use netsh
-    netsh advfirewall firewall set rule group="remote desktop" new enable=Yes 2>$null
-    Write-Ok "Firewall rule enabled for Remote Desktop"
+    # SECURITY: do NOT open RDP to the network by default. The agent's tunnel connects
+    # to 127.0.0.1:3389, and Windows Firewall never filters loopback, so dashboard
+    # remote desktop works with the firewall rule closed. Opening it would expose
+    # port 3389 (with NLA optional, see below) to every machine on the LAN.
+    if ($AllowLanRdp) {
+        # Group by resource id - the display name is translated on non-English Windows
+        Enable-NetFirewallRule -Group '@FirewallAPI.dll,-28752' -ErrorAction SilentlyContinue
+        Write-Warn "Firewall opened for LAN RDP (-AllowLanRdp). Port 3389 is reachable from the network."
+    } else {
+        Write-Ok "Firewall left closed for RDP - only the agent tunnel (localhost) can reach it"
+        Write-Host "    Older installers opened it. To close it on this machine run:" -ForegroundColor Gray
+        Write-Host "    Disable-NetFirewallRule -Group '@FirewallAPI.dll,-28752'" -ForegroundColor Gray
+    }
 
     # Set Network Level Authentication to OPTIONAL (not required).
     # NLA pre-authenticates before the RDP session starts, which is incompatible
@@ -370,10 +326,10 @@ Write-Host "======================================================" -ForegroundC
 Write-Host ""
 Write-Host "  Install path:  $InstallPath"
 Write-Host "  Service name:  $ServiceName"
-Write-Host "  Service user:  .\$ServiceUser"
+Write-Host "  Service user:  LocalSystem"
 Write-Host "  Logs:          $InstallPath\logs\"
 Write-Host "  Config:        $InstallPath\appsettings.local.json"
-Write-Host "  Remote desktop: RDP enabled for web-based remote access via Guacamole"
+Write-Host "  Remote desktop: RDP via the agent tunnel only (firewall closed to the LAN)"
 Write-Host ""
 Write-Host "  Manage:" -ForegroundColor Gray
 Write-Host "    Stop:    Stop-Service $ServiceName"

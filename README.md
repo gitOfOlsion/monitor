@@ -136,9 +136,33 @@ Sign in with the seeded SuperAdmin account, then create institutions and users f
 
 ### Install an agent
 
-1. In the dashboard, open an institution and choose **Download Agent** — this produces an installer pre-configured with the institution's enrolment token.
-2. On the target machine, run the installer as Administrator. The agent installs as the `PeripheralMonitorAgent` service running as **LocalSystem** (required for Terminal Services session queries) and begins reporting.
+1. In the dashboard, open an institution and choose **Download Agent → Windows installer (.exe)**. The file is pre-configured with the institution's enrolment token.
+2. On the target machine, double-click it and accept the administrator prompt. The agent installs as the `PeripheralMonitorAgent` service running as **LocalSystem** (required for Terminal Services session queries) and begins reporting. It appears in **Apps & features**, where it can be uninstalled.
 3. Approve the machine in the dashboard if it appears as pending.
+
+**Mass deployment (GPO, Intune, scripts):**
+
+```powershell
+PeripheralMonitorAgent-Setup-<institution>.exe install --quiet     # unattended install
+PeripheralMonitorAgent-Setup-<institution>.exe install --dry-run   # show what it would do
+"C:\PeripheralMonitor\PeripheralMonitor.Agent.exe" uninstall --quiet [--purge]
+```
+
+Running the same installer again upgrades in place and keeps the event history. Exit codes: `0` ok, `1` failed, `2` no institution config, `3` admin rights declined.
+
+How it works: the agent `.exe` is its own installer. When you download it, the server appends the institution's settings to the end of the stock `.exe` (`InstallerConfigTrailer`), so every download is personalised without a rebuild. A `.zip` with `install.ps1` is still available for script-based installs.
+
+**Linux** — choose **Download Agent → Linux installer (.run)**, then:
+
+```bash
+sudo sh PeripheralMonitorAgent-Setup-<institution>.run              # install or upgrade
+sh PeripheralMonitorAgent-Setup-<institution>.run --dry-run         # check, change nothing
+sudo bash /opt/peripheral-monitor/uninstall.sh [--purge]            # remove
+```
+
+The `.run` file is a short shell script followed by a `.tar.gz` holding the agent, `install.sh` and the institution's config. The server generates it on the fly (`AgentPackageService.WriteLinuxInstallerAsync`). It needs systemd, bash and tar, and works offline: the agent is self-contained, so no .NET runtime is installed.
+
+**Security defaults:** the install folder and `C:\ProgramData\PeripheralMonitor` are readable only by SYSTEM and Administrators. RDP is enabled for the agent tunnel but **not** opened in the firewall (the tunnel connects to `127.0.0.1`). On Linux, x11vnc listens on `127.0.0.1` only. Pass `--allow-lan-rdp` (`-AllowLanRdp` for the script) only if you also want direct RDP from the LAN.
 
 ---
 

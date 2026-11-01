@@ -43,22 +43,29 @@
         <div class="pm-modal pm-modal-wide" @onclick:stopPropagation>
             <h2>📦 Download Agent for @_tokenInstName</h2>
             <p class="pm-modal-hint">
-                Download the agent package for the target platform. It includes the binary,
-                installer script, and a pre-configured token for <strong>@_tokenInstName</strong>.
+                Download the agent installer for the target platform. It is pre-configured
+                for <strong>@_tokenInstName</strong> — no settings to enter.
             </p>
 
             <div class="pm-download-grid">
-                <a class="pm-download-card" href="@GetDownloadUrl("windows")" target="_blank">
+                <a class="pm-download-card" href="@GetWindowsInstallerUrl()" target="_blank">
                     <span class="pm-download-icon">🪟</span>
-                    <span class="pm-download-label">Download for Windows</span>
-                    <span class="pm-download-hint">Run install.ps1 as Administrator</span>
+                    <span class="pm-download-label">Windows installer (.exe)</span>
+                    <span class="pm-download-hint">Double-click and accept the admin prompt</span>
                 </a>
-                <a class="pm-download-card" href="@GetDownloadUrl("linux")" target="_blank">
+                <a class="pm-download-card" href="@GetLinuxInstallerUrl()" target="_blank">
                     <span class="pm-download-icon">🐧</span>
-                    <span class="pm-download-label">Download for Linux</span>
-                    <span class="pm-download-hint">Run: sudo bash install.sh</span>
+                    <span class="pm-download-label">Linux installer (.run)</span>
+                    <span class="pm-download-hint">Run: sudo sh PeripheralMonitorAgent-Setup-….run</span>
                 </a>
             </div>
+
+            <p class="pm-modal-hint" style="margin-top:.75rem">
+                Mass deployment: Windows <code>…Setup-….exe install --quiet</code>,
+                Linux <code>sudo sh …Setup-….run</code> (never prompts).
+                Prefer plain scripts? <a href="@GetDownloadUrl("windows")" target="_blank">Windows .zip</a> ·
+                <a href="@GetDownloadUrl("linux")" target="_blank">Linux .zip</a>.
+            </p>
 
             <details style="margin-top:1rem">
                 <summary style="cursor:pointer;font-size:13px;color:var(--text-muted)">
@@ -245,6 +252,12 @@ else
 
     private string GetDownloadUrl(string platform) =>
         $"/api/download/{_showToken?.Id}/{platform}";
+
+    private string GetWindowsInstallerUrl() =>
+        $"/api/download/{_showToken?.Id}/windows-installer";
+
+    private string GetLinuxInstallerUrl() =>
+        $"/api/download/{_showToken?.Id}/linux-installer";
 
     private async Task OpenRdpCredentials(InstitutionDto inst)
     {
