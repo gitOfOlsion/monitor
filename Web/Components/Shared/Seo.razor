@@ -1,0 +1,46 @@
+@* Per-page search and social metadata: title, description, canonical URL,
+   robots directive, Open Graph / Twitter cards and optional JSON-LD. *@
+@inject IConfiguration Config
+
+<PageTitle>@Title</PageTitle>
+<HeadContent>
+    <meta name="description" content="@Description" />
+    <meta name="robots" content="@(NoIndex ? "noindex, follow" : "index, follow, max-image-preview:large, max-snippet:-1")" />
+    @if (!NoIndex)
+    {
+        <link rel="canonical" href="@Url" />
+    }
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Peripheral Monitor" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:title" content="@(SocialTitle ?? Title)" />
+    <meta property="og:description" content="@Description" />
+    <meta property="og:url" content="@Url" />
+    <meta property="og:image" content="@ImageUrl" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Peripheral Monitor dashboard: live device and USB monitoring" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="@(SocialTitle ?? Title)" />
+    <meta name="twitter:description" content="@Description" />
+    <meta name="twitter:image" content="@ImageUrl" />
+    @if (JsonLd is not null)
+    {
+        @* System.Text.Json escapes < > & by default, so the payload cannot close the script tag. *@
+        @((MarkupString)$"<script type=\"application/ld+json\">{System.Text.Json.JsonSerializer.Serialize(JsonLd)}</script>")
+    }
+</HeadContent>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public string Description { get; set; } = "";
+    /// <summary>Path of this page, starting with "/". Used for the canonical URL.</summary>
+    [Parameter] public string Path { get; set; } = "/";
+    [Parameter] public string? SocialTitle { get; set; }
+    [Parameter] public bool NoIndex { get; set; }
+    [Parameter] public object? JsonLd { get; set; }
+
+    private string BaseUrl => SiteUrl.Base(Config);
+    private string Url => BaseUrl + Path;
+    private string ImageUrl => BaseUrl + "/og-image.png";
+}

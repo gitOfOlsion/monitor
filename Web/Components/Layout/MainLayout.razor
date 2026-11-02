@@ -3,6 +3,9 @@
 @inject ServerApiClient Api
 @implements IDisposable
 
+@* Everything in this layout is behind sign-in (or is the 404 page): keep it out of search results. *@
+<HeadContent><meta name="robots" content="noindex, nofollow" /></HeadContent>
+
 <div class="pm-layout">
     <!-- Mobile top bar with hamburger (hidden on desktop via CSS) -->
     <div class="pm-mobile-bar">

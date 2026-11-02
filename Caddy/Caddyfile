@@ -16,6 +16,22 @@ www.monitorhubs.net {
 
 monitorhubs.net {
 
+    # Security headers (HTTPS-only is also a search ranking signal)
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options    "nosniff"
+        Referrer-Policy           "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Keep machine endpoints and admin tools out of search results
+    @noindex path /api/* /monitor /monitor/* /health /seq/* /remote /remote/* /auth/*
+    header @noindex X-Robots-Tag "noindex, nofollow"
+
+    # Images and icons: cache for a week. (Scripts are not versioned, so they keep the default.)
+    @static path *.svg *.png *.ico *.webmanifest
+    header @static Cache-Control "public, max-age=604800"
+
     # Blazor Server dashboard (default) — everything not matched below
     @web {
         not path /api/* /monitor /monitor/* /health /seq/* /remote /remote/*
@@ -66,5 +82,5 @@ monitorhubs.net {
         reverse_proxy seq:80
     }
 
-    encode gzip
+    encode zstd gzip
 }

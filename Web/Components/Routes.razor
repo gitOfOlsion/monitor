@@ -1,4 +1,4 @@
-<Router AppAssembly="typeof(App).Assembly">
+<Router AppAssembly="typeof(App).Assembly" NotFoundPage="typeof(Pages.NotFound)">
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
             <NotAuthorized>
@@ -10,12 +10,4 @@
         </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
-    <NotFound>
-        <LayoutView Layout="typeof(Layout.MainLayout)">
-            <div class="pm-empty" style="margin-top:4rem">
-                <h2>404 — Page not found</h2>
-                <a href="/" class="pm-btn pm-btn-secondary">Go home</a>
-            </div>
-        </LayoutView>
-    </NotFound>
 </Router>
