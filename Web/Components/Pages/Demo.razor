@@ -8,15 +8,15 @@
 <div class="pm-login-wrap">
     <div class="pm-login-left">
         <div class="pm-login-brand">
-            <span class="pm-login-icon">📡</span>
-            <h1>Try Peripheral Monitor</h1>
-            <p class="pm-login-tagline">Spin up your own institution and admin account in seconds — no setup, no commitment.</p>
+            <a href="/" class="pm-brand-mark pm-brand-mark-lg"><Icon Name="logo" Size="28" /></a>
+            <h1>Try it with your<br />own machines.</h1>
+            <p class="pm-login-tagline">Your own institution and admin account in seconds. No setup, no commitment.</p>
         </div>
         <ul class="pm-login-features">
-            <li>🖥️ Real-time peripheral & metrics monitoring</li>
-            <li>🔑 Browser-based remote desktop</li>
-            <li>📄 Reporting and audit log</li>
-            <li>🗂️ Organise devices into groups</li>
+            <li><Icon Name="activity" /> Real-time peripheral and system metrics</li>
+            <li><Icon Name="remote" /> Remote desktop in the browser</li>
+            <li><Icon Name="file" /> Reports and audit log</li>
+            <li><Icon Name="building" /> Organise devices into groups</li>
         </ul>
         <p class="pm-login-footer">
             Your demo runs for <strong>@DemoDays days</strong>. After it ends, sign-in is disabled and the
@@ -26,13 +26,14 @@
 
     <div class="pm-login-right">
         <div class="pm-login-card">
+            <a class="pm-login-mobile-brand" href="/"><span class="pm-brand-mark"><Icon Name="logo" Size="20" /></span> Peripheral Monitor</a>
             <h2>Create your demo</h2>
             <p class="pm-login-subtitle">All features are enabled except Application Control (reserved for system administrators).</p>
 
             @if (_success)
             {
                 <div class="pm-alert pm-alert-success">
-                    ✅ Your demo is ready! You can now <a href="/login">sign in</a> with the username and password you chose.
+                    Your demo is ready! You can now <a href="/login">sign in</a> with the username and password you chose.
                 </div>
             }
             else
@@ -59,13 +60,13 @@
 
                 <div class="pm-field">
                     <label>Verification: @(_captcha?.Question ?? "loading…")</label>
-                    <div style="display:flex; gap:.5rem; align-items:center">
-                        <input class="pm-input" @bind="_captchaAnswer" placeholder="your answer" style="flex:1" />
+                    <div class="pm-contact-captcha">
+                        <input class="pm-input" @bind="_captchaAnswer" placeholder="your answer" />
                         <button class="pm-btn pm-btn-secondary pm-btn-sm" @onclick="RefreshCaptcha" type="button" title="New question">↻</button>
                     </div>
                 </div>
 
-                <button class="pm-btn pm-btn-primary pm-btn-full" style="margin-top:.5rem"
+                <button class="pm-btn pm-btn-primary pm-btn-full pm-login-submit"
                         @onclick="SubmitAsync" disabled="@_submitting">
                     @(_submitting ? "Creating…" : "Start my demo →")
                 </button>

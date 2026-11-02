@@ -6,8 +6,8 @@
 <div class="pm-layout">
     <!-- Mobile top bar with hamburger (hidden on desktop via CSS) -->
     <div class="pm-mobile-bar">
-        <button class="pm-hamburger" @onclick="ToggleSidebar" aria-label="Menu">☰</button>
-        <span class="pm-mobile-title"><span>📡</span> Peripheral Monitor</span>
+        <button class="pm-hamburger" @onclick="ToggleSidebar" aria-label="Open menu"><Icon Name="menu" Size="20" /></button>
+        <span class="pm-mobile-title"><span class="pm-brand-mark"><Icon Name="logo" Size="18" /></span> Peripheral Monitor</span>
     </div>
 
     @if (_sidebarOpen)
@@ -15,72 +15,39 @@
         <div class="pm-sidebar-backdrop" @onclick="CloseSidebar"></div>
     }
 
-    <nav class="pm-sidebar @(_sidebarOpen ? "pm-sidebar-open" : "")">
-        <div class="pm-logo">
-            <span class="pm-logo-icon">📡</span>
-            <span class="pm-logo-text">Peripheral Monitor</span>
-        </div>
+    <nav class="pm-sidebar @(_sidebarOpen ? "pm-sidebar-open" : "")" aria-label="Main">
+        <a class="pm-logo" href="/dashboard">
+            <span class="pm-brand-mark"><Icon Name="logo" Size="20" /></span>
+            <span class="pm-logo-text">
+                <span class="pm-logo-name">Peripheral Monitor</span>
+                <span class="pm-logo-sub">Device visibility hub</span>
+            </span>
+        </a>
 
         <AuthorizeView>
             <Authorized Context="auth">
                 <ul class="pm-nav">
-                    <li>
-                        <NavLink href="/dashboard" Match="NavLinkMatch.All">
-                            <span class="pm-nav-icon">🏠</span> Dashboard
-                        </NavLink>
-                    </li>
-                    <li>
-                        <NavLink href="/agents">
-                            <span class="pm-nav-icon">🖥️</span> Agents
-                        </NavLink>
-                    </li>
-                    <li>
-                        <NavLink href="/events">
-                            <span class="pm-nav-icon">📋</span> Events
-                        </NavLink>
-                    </li>
-                    <li>
-                        <NavLink href="/analytics">
-                            <span class="pm-nav-icon">📊</span> Analytics
-                        </NavLink>
-                    </li>
-                    <li>
-                        <NavLink href="/metrics">
-                            <span class="pm-nav-icon">📈</span> Metrics
-                        </NavLink>
-                    </li>
+                    <li><NavLink href="/dashboard" Match="NavLinkMatch.All"><Icon Name="home" /> Dashboard</NavLink></li>
+                    <li><NavLink href="/agents"><Icon Name="monitor" /> Agents</NavLink></li>
+                    <li><NavLink href="/events"><Icon Name="events" /> Events</NavLink></li>
+                    <li><NavLink href="/analytics"><Icon Name="chart" /> Analytics</NavLink></li>
+                    <li><NavLink href="/metrics"><Icon Name="activity" /> Metrics</NavLink></li>
 
                     <!-- Admin links: SuperAdmin + InstitutionAdmin -->
                     <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="adminAuth">
                         <li class="pm-nav-divider"></li>
                         <li class="pm-nav-section">Administration</li>
-                        <li>
-                            <NavLink href="/features">
-                                <span class="pm-nav-icon">🎛️</span> Features
-                            </NavLink>
-                        </li>
+                        <li><NavLink href="/features"><Icon Name="sliders" /> Features</NavLink></li>
                         @if (_reportsEnabled)
                         {
-                            <li>
-                                <NavLink href="/reports">
-                                    <span class="pm-nav-icon">📄</span> Reports
-                                </NavLink>
-                            </li>
+                            <li><NavLink href="/reports"><Icon Name="file" /> Reports</NavLink></li>
                         }
-                        <li>
-                            <NavLink href="/users">
-                                <span class="pm-nav-icon">👥</span> Users
-                            </NavLink>
-                        </li>
-                        <li>
-                            <NavLink href="/audit">
-                                <span class="pm-nav-icon">📜</span> Audit Log
-                            </NavLink>
-                        </li>
+                        <li><NavLink href="/users"><Icon Name="users" /> Users</NavLink></li>
+                        <li><NavLink href="/audit"><Icon Name="history" /> Audit Log</NavLink></li>
                         <AuthorizeView Roles="SuperAdmin" Context="msgAuth">
                             <li>
                                 <NavLink href="/messages">
-                                    <span class="pm-nav-icon">✉️</span> Messages
+                                    <Icon Name="mail" /> Messages
                                     @if (_unreadMessages > 0)
                                     { <span class="pm-nav-badge">@_unreadMessages</span> }
                                 </NavLink>
@@ -92,7 +59,7 @@
                     <AuthorizeView Roles="SuperAdmin,InstitutionAdmin" Context="instAuth">
                         <li>
                             <NavLink href="/institutions">
-                                <span class="pm-nav-icon">🏛️</span>
+                                <Icon Name="building" />
                                 @(instAuth.User.IsInRole("SuperAdmin") ? "Institutions" : "My Institution")
                             </NavLink>
                         </li>
@@ -100,26 +67,30 @@
                 </ul>
 
                 <div class="pm-sidebar-footer">
+                    @{
+                        var name = auth.User.Identity?.Name ?? "";
+                        var role = auth.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+                        var inst = auth.User.FindFirst("institution_name")?.Value;
+                    }
                     <div class="pm-user-info">
-                        <span class="pm-user-icon">👤</span>
+                        <span class="pm-user-icon" aria-hidden="true">@(name.Length > 0 ? name[..1] : "?")</span>
                         <div class="pm-user-detail">
-                            <span class="pm-user-name">@auth.User.Identity?.Name</span>
-                            <span class="pm-user-role">@auth.User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value</span>
-                            @{
-                                var inst = auth.User.FindFirst("institution_name")?.Value;
-                            }
+                            <span class="pm-user-name">@name</span>
+                            <span class="pm-user-role">@RoleLabel(role)</span>
                             @if (!string.IsNullOrEmpty(inst))
                             { <span class="pm-user-inst">@inst</span> }
                         </div>
                     </div>
-                    <a href="/auth/logout" class="pm-logout-btn">🚪 Logout</a>
+                    <a href="/auth/logout" class="pm-logout-btn"><Icon Name="logout" Size="16" /> Sign out</a>
                 </div>
             </Authorized>
         </AuthorizeView>
     </nav>
 
     <main class="pm-main">
-        @Body
+        <div class="pm-main-inner">
+            @Body
+        </div>
     </main>
 </div>
 
@@ -130,6 +101,14 @@
 
     private void ToggleSidebar() => _sidebarOpen = !_sidebarOpen;
     private void CloseSidebar()  => _sidebarOpen = false;
+
+    private static string RoleLabel(string? role) => role switch
+    {
+        "SuperAdmin"       => "Super admin",
+        "InstitutionAdmin" => "Institution admin",
+        null or ""         => "",
+        _                  => role,
+    };
 
     protected override void OnInitialized()
     {

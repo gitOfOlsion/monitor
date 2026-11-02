@@ -10,22 +10,37 @@
 <PageTitle>Dashboard</PageTitle>
 
 <div class="pm-page-header">
-    <h1>Dashboard</h1>
+    <div>
+        <h1>@Greeting()</h1>
+        <p class="pm-page-sub">Here's how your machines are doing right now.</p>
+    </div>
     <span class="pm-hub-badge @(IsConnected ? "pm-badge-connected" : "pm-badge-disconnected")">
-        @(IsConnected ? "● Live" : "● Reconnecting…")
+        <span class="pm-badge-dot"></span>@(IsConnected ? "Live" : "Reconnecting…")
     </span>
 </div>
 
 <div class="pm-stats-row">
-    <div class="pm-stat-card"><div class="pm-stat-value">@_agents.Count</div><div class="pm-stat-label">Total Agents</div></div>
-    <div class="pm-stat-card pm-stat-green"><div class="pm-stat-value">@_agents.Count(a => a.Status == "Approved")</div><div class="pm-stat-label">Approved</div></div>
-    <div class="pm-stat-card pm-stat-orange"><div class="pm-stat-value">@_agents.Count(a => a.Status == "Pending")</div><div class="pm-stat-label">Pending</div></div>
-    <div class="pm-stat-card pm-stat-red"><div class="pm-stat-value">@_agents.Count(a => a.Status == "Offline")</div><div class="pm-stat-label">Offline</div></div>
+    <div class="pm-stat-card">
+        <div class="pm-stat-icon"><Icon Name="monitor" Size="22" /></div>
+        <div><div class="pm-stat-value">@_agents.Count</div><div class="pm-stat-label">Total agents</div></div>
+    </div>
+    <div class="pm-stat-card pm-stat-green">
+        <div class="pm-stat-icon"><Icon Name="check" Size="22" /></div>
+        <div><div class="pm-stat-value">@_agents.Count(a => a.Status == "Approved")</div><div class="pm-stat-label">Approved</div></div>
+    </div>
+    <div class="pm-stat-card pm-stat-orange">
+        <div class="pm-stat-icon"><Icon Name="history" Size="22" /></div>
+        <div><div class="pm-stat-value">@_agents.Count(a => a.Status == "Pending")</div><div class="pm-stat-label">Waiting for approval</div></div>
+    </div>
+    <div class="pm-stat-card pm-stat-red">
+        <div class="pm-stat-icon"><Icon Name="activity" Size="22" /></div>
+        <div><div class="pm-stat-value">@_agents.Count(a => a.Status == "Offline")</div><div class="pm-stat-label">Offline</div></div>
+    </div>
 </div>
 
 <!-- Active agents grouped by institution -->
 <div class="pm-section">
-    <h2>Active Agents</h2>
+    <h2>Active agents</h2>
     @foreach (var group in _agents.Where(a => a.Status == "Approved")
                                   .GroupBy(a => a.Institution?.Name ?? "Unassigned")
                                   .OrderBy(g => g.Key))
@@ -35,7 +50,8 @@
             @foreach (var a in group)
             {
                 <div class="pm-agent-card @(IsStale(a) ? "pm-agent-stale" : "")">
-                    <div class="pm-agent-name">@Icon(a.Platform) @a.MachineName</div>
+                    <div class="pm-agent-name"><Icon Name="monitor" Size="16" /> @a.MachineName</div>
+                    <div class="pm-agent-meta">@a.Platform</div>
                     <div class="pm-agent-meta">@a.IPAddress</div>
                     <div class="pm-agent-devices">@a.DeviceCount devices</div>
                     <div class="pm-agent-heartbeat">@(a.LastHeartbeat.HasValue ? Fmt(a.LastHeartbeat.Value, "HH:mm:ss") : "—")</div>
@@ -44,12 +60,17 @@
         </div>
     }
     @if (!_agents.Any(a => a.Status == "Approved"))
-    { <div class="pm-empty">No approved agents online.</div> }
+    {
+        <div class="pm-empty">
+            <strong>No agents online yet</strong>
+            <span>Install the agent from <a href="/institutions">Institutions</a>, then approve it on the <a href="/agents">Agents</a> page.</span>
+        </div>
+    }
 </div>
 
 <!-- Live event feed -->
 <div class="pm-section">
-    <h2>Live Event Feed</h2>
+    <h2>Live event feed</h2>
     <div class="pm-event-feed">
         @foreach (var ev in _events.Take(100))
         {
@@ -62,7 +83,12 @@
             </div>
         }
         @if (!_events.Any())
-        { <div class="pm-empty">Waiting for events…</div> }
+        {
+            <div class="pm-empty">
+                <strong>All quiet</strong>
+                <span>Device plug-ins and unplugs will appear here the moment they happen.</span>
+            </div>
+        }
     </div>
 </div>
 
@@ -119,7 +145,11 @@
     }
 
     private static bool IsStale(AgentDto a) => a.LastHeartbeat.HasValue && (DateTime.UtcNow - a.LastHeartbeat.Value).TotalSeconds > 30;
-    private static string Icon(string p) => p switch { "Windows" => "🪟", "Linux" => "🐧", _ => "🖥️" };
+    private string Greeting()
+    {
+        var hour = DateTime.UtcNow.Add(_tzOffset).Hour;
+        return hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+    }
 
     public async ValueTask DisposeAsync()
     {

@@ -30,28 +30,28 @@ else
 
         <!-- Summary stat cards -->
         <div class="pm-stat-card pm-stat-blue">
-            <div class="pm-stat-icon">📊</div>
+            <div class="pm-stat-icon"><Icon Name="chart" Size="22" /></div>
             <div>
                 <div class="pm-stat-value">@_events.Count</div>
                 <div class="pm-stat-label">Total events</div>
             </div>
         </div>
         <div class="pm-stat-card pm-stat-violet">
-            <div class="pm-stat-icon">🖥️</div>
+            <div class="pm-stat-icon"><Icon Name="monitor" Size="22" /></div>
             <div>
                 <div class="pm-stat-value">@_events.Select(e => e.MachineName).Distinct().Count()</div>
                 <div class="pm-stat-label">Machines reporting</div>
             </div>
         </div>
         <div class="pm-stat-card pm-stat-green">
-            <div class="pm-stat-icon">🔌</div>
+            <div class="pm-stat-icon"><Icon Name="usb" Size="22" /></div>
             <div>
                 <div class="pm-stat-value">@_events.Count(e => e.EventType.Equals("Connected", StringComparison.OrdinalIgnoreCase))</div>
                 <div class="pm-stat-label">Connect events</div>
             </div>
         </div>
         <div class="pm-stat-card pm-stat-amber">
-            <div class="pm-stat-icon">⏏️</div>
+            <div class="pm-stat-icon"><Icon Name="logout" Size="22" /></div>
             <div>
                 <div class="pm-stat-value">@_events.Count(e => e.EventType.Equals("Disconnected", StringComparison.OrdinalIgnoreCase))</div>
                 <div class="pm-stat-label">Disconnect events</div>
