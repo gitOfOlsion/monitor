@@ -1,0 +1,20 @@
+@page "/not-found"
+@layout PeripheralMonitor.Web.Components.Layout.EmptyLayout
+@attribute [AllowAnonymous]
+
+<Seo Title="Page not found | Peripheral Monitor"
+     Description="This page doesn't exist. Go back to Peripheral Monitor's home page or sign in."
+     Path="/not-found" NoIndex="true" />
+
+<div class="pm-landing">
+    <main class="pm-notfound">
+        <a class="pm-landing-brand" href="/"><span class="pm-brand-mark"><Icon Name="logo" Size="20" /></span> Peripheral Monitor</a>
+        <p class="pm-notfound-code">404</p>
+        <h1>We couldn't find that page</h1>
+        <p>The link may be old, or the address may have a typo.</p>
+        <div class="pm-hero-cta">
+            <a href="/" class="pm-btn pm-btn-primary">Go to the home page</a>
+            <a href="/login" class="pm-hero-link">Sign in</a>
+        </div>
+    </main>
+</div>

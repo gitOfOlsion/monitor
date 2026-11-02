@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- Source for wwwroot/og-image.png (social share preview). Regenerate with Web/Branding/render.sh -->
+  <defs>
+    <radialGradient id="glowA" cx="88%" cy="8%" r="55%"><stop offset="0" stop-color="#c2703d" stop-opacity=".22"/><stop offset="1" stop-color="#c2703d" stop-opacity="0"/></radialGradient>
+    <radialGradient id="glowB" cx="0%" cy="70%" r="55%"><stop offset="0" stop-color="#0f6e66" stop-opacity=".16"/><stop offset="1" stop-color="#0f6e66" stop-opacity="0"/></radialGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="130%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#2d1e0c" flood-opacity=".18"/></filter>
+  </defs>
+  <rect width="1200" height="630" fill="#f5f1ea"/>
+  <rect width="1200" height="630" fill="url(#glowA)"/>
+  <rect width="1200" height="630" fill="url(#glowB)"/>
+
+  <!-- brand -->
+  <rect x="72" y="70" width="56" height="56" rx="16" fill="#0f6e66"/>
+  <g fill="none" stroke="#fff" stroke-width="3.2" stroke-linecap="round" transform="translate(72 70) scale(2.333)">
+    <path d="M5 12a7 7 0 0 1 7-7M8.5 12A3.5 3.5 0 0 1 12 8.5M19 12a7 7 0 0 1-7 7M15.5 12a3.5 3.5 0 0 1-3.5 3.5" stroke-width="1.6"/>
+  </g>
+  <circle cx="100" cy="98" r="3.8" fill="#fff"/>
+  <text x="146" y="108" font-family="Liberation Serif, DejaVu Serif, serif" font-size="32" font-weight="700" fill="#24211c">Peripheral Monitor</text>
+
+  <!-- headline -->
+  <text font-family="Liberation Serif, DejaVu Serif, serif" font-weight="700" fill="#0d3f3b">
+    <tspan x="72" y="250" font-size="66">Monitor every device,</tspan>
+    <tspan x="72" y="330" font-size="66" font-style="italic" fill="#0f6e66">across every institution.</tspan>
+  </text>
+  <text font-family="Liberation Sans, DejaVu Sans, sans-serif" font-size="27" fill="#776f63">
+    <tspan x="72" y="400">USB &amp; peripheral tracking · live metrics</tspan>
+    <tspan x="72" y="440">remote desktop in the browser</tspan>
+  </text>
+  <rect x="72" y="492" width="290" height="62" rx="14" fill="#0f6e66"/>
+  <text x="217" y="532" text-anchor="middle" font-family="Liberation Sans, DejaVu Sans, sans-serif" font-size="24" font-weight="700" fill="#fff">monitorhubs.net</text>
+
+  <!-- mini dashboard -->
+  <g filter="url(#shadow)" transform="rotate(1.2 950 330)">
+    <rect x="760" y="150" width="380" height="350" rx="26" fill="#fffdf9" stroke="#e6dfd3"/>
+    <circle cx="790" cy="180" r="6" fill="#d6ccbc"/><circle cx="810" cy="180" r="6" fill="#d6ccbc"/><circle cx="830" cy="180" r="6" fill="#d6ccbc"/>
+    <rect x="1060" y="168" width="58" height="24" rx="12" fill="#e2f1e7"/>
+    <text x="1089" y="185" text-anchor="middle" font-family="Liberation Sans, DejaVu Sans, sans-serif" font-size="14" font-weight="700" fill="#226f48">Live</text>
+    <g font-family="Liberation Sans, DejaVu Sans, sans-serif">
+      <rect x="782" y="208" width="106" height="74" rx="14" fill="#f3eee6"/>
+      <text x="798" y="245" font-size="28" font-weight="700" fill="#24211c">128</text><text x="798" y="268" font-size="14" fill="#776f63">Agents</text>
+      <rect x="898" y="208" width="106" height="74" rx="14" fill="#f3eee6"/>
+      <text x="914" y="245" font-size="28" font-weight="700" fill="#24211c">124</text><text x="914" y="268" font-size="14" fill="#776f63">Online</text>
+      <rect x="1014" y="208" width="104" height="74" rx="14" fill="#f3eee6"/>
+      <text x="1030" y="245" font-size="28" font-weight="700" fill="#24211c">3</text><text x="1030" y="268" font-size="14" fill="#776f63">Pending</text>
+
+      <rect x="782" y="296" width="336" height="40" rx="11" fill="#f3eee6"/>
+      <text x="798" y="321" font-size="15" fill="#24211c">LAB1-PC07 · USB drive</text>
+      <rect x="1010" y="306" width="96" height="22" rx="11" fill="#e2f1e7"/><text x="1058" y="322" text-anchor="middle" font-size="13" font-weight="700" fill="#226f48">Connected</text>
+      <rect x="782" y="344" width="336" height="40" rx="11" fill="#f3eee6"/>
+      <text x="798" y="369" font-size="15" fill="#24211c">LIB-DESK02 · Headset</text>
+      <rect x="1000" y="354" width="106" height="22" rx="11" fill="#f8e2de"/><text x="1053" y="370" text-anchor="middle" font-size="13" font-weight="700" fill="#a1342b">Disconnected</text>
+    </g>
+    <rect x="782" y="396" width="336" height="84" rx="14" fill="#f3eee6"/>
+    <path d="M782 456 C820 448 840 420 880 428 S940 462 980 440 S1050 406 1090 422 L1118 412 V480 H782Z" fill="#ddeeea"/>
+    <path d="M782 456 C820 448 840 420 880 428 S940 462 980 440 S1050 406 1090 422 L1118 412" fill="none" stroke="#0f6e66" stroke-width="3"/>
+  </g>
+</svg>

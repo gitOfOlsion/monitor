@@ -73,6 +73,12 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
       ServerApiUrl:           http://server:5000
       Seq__Url:               http://seq:5341
+      # Public origin used for canonical URLs, the sitemap and social previews
+      PublicUrl:              ${PUBLIC_URL:-https://monitorhubs.net}
+      # Optional search-console ownership codes (leave empty if unused)
+      GoogleSiteVerification: ${GOOGLE_SITE_VERIFICATION:-}
+      BingSiteVerification:   ${BING_SITE_VERIFICATION:-}
+      YandexVerification:     ${YANDEX_VERIFICATION:-}
     networks: [internal]
     expose: ["5001"]
 

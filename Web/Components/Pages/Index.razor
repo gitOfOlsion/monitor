@@ -5,33 +5,39 @@
 @inject NavigationManager Nav
 @inject ServerApiClient Api
 
-<PageTitle>Peripheral Monitor — Centralised device visibility</PageTitle>
+<Seo Title="USB & Device Monitoring with Browser Remote Desktop | Peripheral Monitor"
+     SocialTitle="Peripheral Monitor: USB & device monitoring with remote desktop in the browser"
+     Description="Track USB drives, keyboards and other peripherals in real time, watch live CPU and memory, and open remote desktop in the browser for every Windows and Linux PC."
+     Path="/" JsonLd="_jsonLd" />
 
 <div class="pm-landing">
 
     <!-- Top bar -->
     <header class="pm-landing-nav">
-        <a class="pm-landing-brand" href="/">
+        <a class="pm-landing-brand" href="/" aria-label="Peripheral Monitor home">
             <span class="pm-brand-mark"><Icon Name="logo" Size="20" /></span>
             <span>Peripheral Monitor</span>
         </a>
-        <div class="pm-landing-nav-actions">
+        <nav class="pm-landing-nav-actions" aria-label="Site">
             <a href="#features" class="pm-landing-nav-link">Features</a>
-            <a href="#contact" class="pm-landing-nav-link">Contact</a>
+            <a href="#how-it-works" class="pm-landing-nav-link">How it works</a>
+            <a href="#faq" class="pm-landing-nav-link">FAQ</a>
             <a href="/login" class="pm-landing-nav-link">Sign in</a>
             <a href="/demo" class="pm-btn pm-btn-primary pm-btn-sm">Try a demo</a>
-        </div>
+        </nav>
     </header>
 
+    <main>
     <!-- Hero -->
-    <section class="pm-hero">
+    <section class="pm-hero" aria-labelledby="hero-title">
         <div class="pm-hero-inner">
             <div>
-                <span class="pm-hero-eyebrow"><Icon Name="activity" Size="15" /> Live device monitoring for institutions</span>
-                <h1>See every device, <em>across every institution.</em></h1>
+                <span class="pm-hero-eyebrow"><Icon Name="activity" Size="15" /> USB, peripheral and PC monitoring for institutions</span>
+                <h1 id="hero-title">Monitor every device, <em>across every institution.</em></h1>
                 <p class="pm-hero-sub">
-                    Real-time peripheral tracking, live system metrics, remote desktop in the browser
-                    and application control, for every machine in one calm dashboard.
+                    See USB drives, keyboards, mice and headsets the moment they connect, watch live CPU,
+                    memory and network use, and open a remote desktop in the browser, for every Windows
+                    and Linux PC in one calm dashboard.
                 </p>
                 <div class="pm-hero-cta">
                     <a href="/demo" class="pm-btn pm-btn-primary pm-btn-lg">Start a free demo <Icon Name="arrow" Size="17" /></a>
@@ -68,15 +74,17 @@
     </section>
 
     <!-- Services -->
-    <section class="pm-services" id="features">
+    <section class="pm-services" id="features" aria-labelledby="features-title">
         <div class="pm-services-inner">
-            <h2>Everything you need to look after your machines</h2>
+            <h2 id="features-title">Everything you need to look after your machines</h2>
             <p class="pm-services-intro">Pick a capability to see what it does.</p>
 
-            <div class="pm-service-grid">
+            <div class="pm-service-grid" role="tablist" aria-label="Capabilities">
                 @foreach (var s in _services)
                 {
                     <button class="pm-service-card @(_selected == s.Key ? "pm-service-active" : "")"
+                            role="tab" id="tab-@s.Key" aria-controls="panel-@s.Key"
+                            aria-selected="@(_selected == s.Key ? "true" : "false")"
                             @onclick="() => Select(s.Key)">
                         <span class="pm-service-icon"><Icon Name="@s.Icon" Size="20" /></span>
                         <span class="pm-service-title">@s.Title</span>
@@ -84,30 +92,97 @@
                 }
             </div>
 
-            @if (_current != null)
+            @* Every panel is in the HTML so search engines can read all six; only the selected one is shown. *@
+            @foreach (var s in _services)
             {
-                <div class="pm-service-detail" @key="_current.Key">
+                <div class="pm-service-detail" id="panel-@s.Key" role="tabpanel" aria-labelledby="tab-@s.Key"
+                     hidden="@(_selected != s.Key)">
                     <div class="pm-service-detail-text">
-                        <h3><Icon Name="@_current.Icon" Size="22" /> @_current.Title</h3>
-                        <p>@_current.Description</p>
+                        <h3><Icon Name="@s.Icon" Size="22" /> @s.Title</h3>
+                        <p>@s.Description</p>
                         <ul>
-                            @foreach (var p in _current.Points)
+                            @foreach (var p in s.Points)
                             { <li>@p</li> }
                         </ul>
                     </div>
-                    <div class="pm-service-detail-art">
-                        @((MarkupString)_current.Svg)
+                    <div class="pm-service-detail-art" aria-hidden="true">
+                        @((MarkupString)s.Svg)
                     </div>
                 </div>
             }
         </div>
     </section>
 
+    <!-- How it works -->
+    <section class="pm-steps-section" id="how-it-works" aria-labelledby="how-title">
+        <div class="pm-services-inner">
+            <h2 id="how-title">Up and running in three steps</h2>
+            <p class="pm-services-intro">No servers to configure on each PC and no ports to open on your network.</p>
+            <ol class="pm-steps">
+                <li class="pm-step">
+                    <span class="pm-step-num">1</span>
+                    <h3>Create your institution</h3>
+                    <p>Add a school, company or department and invite admins. Each institution only sees its own machines.</p>
+                </li>
+                <li class="pm-step">
+                    <span class="pm-step-num">2</span>
+                    <h3>Install the one-file agent</h3>
+                    <p>Download a ready-configured installer: an <strong>.exe</strong> for Windows or a <strong>.run</strong> file for Linux. It works silently for mass deployment too.</p>
+                </li>
+                <li class="pm-step">
+                    <span class="pm-step-num">3</span>
+                    <h3>Approve and start monitoring</h3>
+                    <p>Approve the new PC in the dashboard. Device events, live metrics and remote desktop are available straight away.</p>
+                </li>
+            </ol>
+        </div>
+    </section>
+
+    <!-- Who it's for -->
+    <section class="pm-services pm-audience-section" aria-labelledby="audience-title">
+        <div class="pm-services-inner">
+            <h2 id="audience-title">Built for teams that look after many PCs</h2>
+            <div class="pm-audience-grid">
+                <article class="pm-audience">
+                    <span class="pm-service-icon"><Icon Name="building" Size="20" /></span>
+                    <h3>Schools and universities</h3>
+                    <p>Keep computer labs and libraries in order: see who plugged in a USB stick, which lab PC is offline, and help students remotely.</p>
+                </article>
+                <article class="pm-audience">
+                    <span class="pm-service-icon"><Icon Name="users" Size="20" /></span>
+                    <h3>Companies and IT teams</h3>
+                    <p>Monitor office and remote workstations, block unapproved applications and support staff without installing a remote-access client.</p>
+                </article>
+                <article class="pm-audience">
+                    <span class="pm-service-icon"><Icon Name="shield" Size="20" /></span>
+                    <h3>Hospitals and public sector</h3>
+                    <p>Track removable storage on sensitive machines and keep a full audit trail of every administrative action.</p>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="pm-steps-section" id="faq" aria-labelledby="faq-title">
+        <div class="pm-services-inner pm-faq-inner">
+            <h2 id="faq-title">Frequently asked questions</h2>
+            <div class="pm-faq">
+                @foreach (var f in _faq)
+                {
+                    <details class="pm-faq-item">
+                        <summary>@f.Q</summary>
+                        <p>@f.A</p>
+                    </details>
+                }
+            </div>
+        </div>
+    </section>
+
     <!-- Contact -->
-    <section class="pm-contact" id="contact">
+    <section class="pm-contact" id="contact" aria-labelledby="contact-title">
         <div class="pm-contact-inner">
             <div class="pm-contact-intro">
-                <h2>Get in touch</h2>
+                <h2 id="contact-title">Get in touch</h2>
                 <p>
                     Questions about deployment, pricing, or whether Peripheral Monitor fits your
                     institution? Send a message and we'll get back to you.
@@ -133,27 +208,27 @@
 
                     <div class="pm-contact-row">
                         <div class="pm-field">
-                            <label>Name</label>
-                            <input class="pm-input" @bind="_name" placeholder="Your name" />
+                            <label for="c-name">Name</label>
+                            <input id="c-name" class="pm-input" @bind="_name" placeholder="Your name" autocomplete="name" />
                         </div>
                         <div class="pm-field">
-                            <label>Email</label>
-                            <input class="pm-input" type="email" @bind="_email" placeholder="you@example.com" />
+                            <label for="c-email">Email</label>
+                            <input id="c-email" class="pm-input" type="email" @bind="_email" placeholder="you@example.com" autocomplete="email" />
                         </div>
                     </div>
                     <div class="pm-contact-row">
                         <div class="pm-field">
-                            <label>Phone number</label>
-                            <input class="pm-input" @bind="_phone" placeholder="+355 …" />
+                            <label for="c-phone">Phone number</label>
+                            <input id="c-phone" class="pm-input" type="tel" @bind="_phone" placeholder="+355 …" autocomplete="tel" />
                         </div>
                         <div class="pm-field">
-                            <label>Subject</label>
-                            <input class="pm-input" @bind="_subject" placeholder="How can we help?" />
+                            <label for="c-subject">Subject</label>
+                            <input id="c-subject" class="pm-input" @bind="_subject" placeholder="How can we help?" />
                         </div>
                     </div>
                     <div class="pm-field">
-                        <label>Message</label>
-                        <textarea class="pm-input pm-textarea" rows="5" @bind="_message"
+                        <label for="c-message">Message</label>
+                        <textarea id="c-message" class="pm-input pm-textarea" rows="5" @bind="_message"
                                   placeholder="Tell us a bit about what you need…"></textarea>
                     </div>
 
@@ -164,11 +239,11 @@
                     </div>
 
                     <div class="pm-field">
-                        <label>Verification: @(_captcha?.Question ?? "loading…")</label>
+                        <label for="c-captcha">Verification: @(_captcha?.Question ?? "loading…")</label>
                         <div class="pm-contact-captcha">
-                            <input class="pm-input" @bind="_captchaAnswer" placeholder="your answer" />
+                            <input id="c-captcha" class="pm-input" @bind="_captchaAnswer" placeholder="your answer" />
                             <button class="pm-btn pm-btn-secondary pm-btn-sm" type="button"
-                                    @onclick="RefreshCaptcha" title="New question">↻</button>
+                                    @onclick="RefreshCaptcha" title="New question" aria-label="New question">↻</button>
                         </div>
                     </div>
 
@@ -180,16 +255,100 @@
         </div>
     </section>
 
+    </main>
+
     <footer class="pm-landing-footer">
-        © @DateTime.UtcNow.Year Peripheral Monitor · All rights reserved
+        <nav class="pm-footer-links" aria-label="Footer">
+            <a href="#features">Features</a>
+            <a href="#how-it-works">How it works</a>
+            <a href="#faq">FAQ</a>
+            <a href="#contact">Contact</a>
+            <a href="/demo">Free demo</a>
+            <a href="/login">Sign in</a>
+        </nav>
+        <span>© @DateTime.UtcNow.Year Peripheral Monitor</span>
     </footer>
 </div>
 
 @code {
-    private string _selected = "tracking";
-    private Service? _current => _services.FirstOrDefault(s => s.Key == _selected);
+    [Inject] private IConfiguration Config { get; set; } = default!;
 
+    private string _selected = "tracking";
     private void Select(string key) => _selected = key;
+
+    // ── FAQ (shown on the page and mirrored in FAQPage structured data) ─────
+    private record Faq(string Q, string A);
+    private readonly Faq[] _faq =
+    {
+        new("What does Peripheral Monitor do?",
+            "It shows every Windows and Linux PC in your institutions in one dashboard: which USB and other peripheral devices connect or disconnect, live CPU, memory, disk and network use, who is signed in, and a remote desktop you open in the browser."),
+        new("Do I need to open firewall ports or install a remote-desktop client?",
+            "No. The agent on each PC connects out to the server through a secure reverse tunnel, so remote desktop works behind NAT and firewalls with no inbound ports and nothing to install on the admin's computer."),
+        new("Which operating systems are supported?",
+            "Windows (installed as a service from a single .exe) and Linux with systemd (installed from a single .run file). Both installers support silent mass deployment."),
+        new("Which devices can it track?",
+            "USB storage, keyboards, mice, audio devices, HID devices, Bluetooth, storage and displays. Every connect and disconnect is recorded in a history that survives restarts."),
+        new("Can several schools or companies share one installation?",
+            "Yes. Each institution admin sees only their own machines, super admins see everything, and roles keep every tenant's data separate."),
+        new("Can I try it before deploying it everywhere?",
+            "Yes. Start a free 15-day demo: you get your own institution and admin account in seconds, with all features except application control."),
+    };
+
+    // ── Structured data for search engines (JSON-LD) ───────────────────────
+    private Dictionary<string, object> _jsonLd = new();
+
+    protected override void OnInitialized()
+    {
+        var site = SiteUrl.Base(Config);
+        _jsonLd = new()
+        {
+            ["@context"] = "https://schema.org",
+            ["@graph"] = new object[]
+            {
+                new Dictionary<string, object>
+                {
+                    ["@type"] = "Organization", ["@id"] = site + "/#org",
+                    ["name"] = "Peripheral Monitor", ["url"] = site + "/",
+                    ["logo"] = site + "/icon-512.png",
+                },
+                new Dictionary<string, object>
+                {
+                    ["@type"] = "WebSite", ["@id"] = site + "/#website",
+                    ["name"] = "Peripheral Monitor", ["url"] = site + "/",
+                    ["publisher"] = new Dictionary<string, object> { ["@id"] = site + "/#org" },
+                    ["inLanguage"] = "en",
+                },
+                new Dictionary<string, object>
+                {
+                    ["@type"] = "SoftwareApplication", ["@id"] = site + "/#app",
+                    ["name"] = "Peripheral Monitor",
+                    ["applicationCategory"] = "BusinessApplication",
+                    ["applicationSubCategory"] = "Device monitoring and remote desktop",
+                    ["operatingSystem"] = "Windows, Linux",
+                    ["url"] = site + "/",
+                    ["image"] = site + "/og-image.png",
+                    ["description"] = "USB and peripheral device monitoring, live system metrics, browser-based remote desktop and application control for every Windows and Linux PC across your institutions.",
+                    ["featureList"] = _services.Select(s => s.Title).ToArray(),
+                    ["offers"] = new Dictionary<string, object>
+                    {
+                        ["@type"] = "Offer", ["price"] = "0", ["priceCurrency"] = "EUR",
+                        ["description"] = "Free 15-day demo",
+                        ["url"] = site + "/demo",
+                    },
+                    ["publisher"] = new Dictionary<string, object> { ["@id"] = site + "/#org" },
+                },
+                new Dictionary<string, object>
+                {
+                    ["@type"] = "FAQPage", ["@id"] = site + "/#faq",
+                    ["mainEntity"] = _faq.Select(f => new Dictionary<string, object>
+                    {
+                        ["@type"] = "Question", ["name"] = f.Q,
+                        ["acceptedAnswer"] = new Dictionary<string, object> { ["@type"] = "Answer", ["text"] = f.A },
+                    }).ToArray(),
+                },
+            },
+        };
+    }
 
     // ── Contact form ─────────────────────────────────────────────────────────
     private string _name = "", _email = "", _phone = "", _subject = "", _message = "";
@@ -239,19 +398,19 @@
 
     private readonly List<Service> _services = new()
     {
-        new("tracking", "usb","Real-time peripheral tracking",
+        new("tracking", "usb", "USB & peripheral tracking",
             "Track USB, keyboard, mouse, audio, HID, Bluetooth, storage and display devices the moment they connect or disconnect — with a durable event history that survives restarts.",
             new[] { "USB, input, audio, storage and more", "Instant connect / disconnect events", "Durable history that survives reconnects" },
             SvgTracking),
-        new("metrics", "activity","Live system metrics",
+        new("metrics", "activity", "Live system metrics",
             "See per-device CPU, memory, disk activity and network throughput in real time, sampled from the same performance counters Task Manager uses.",
             new[] { "CPU · RAM · Disk · Network", "Live gauges and sparklines", "Task-Manager-accurate sampling" },
             SvgMetrics),
-        new("remote", "remote","Web-based remote desktop",
-            "Open a full remote desktop session in the browser — no client to install. Works even for machines behind NAT, thanks to a secure reverse tunnel.",
+        new("remote", "remote", "Remote desktop in the browser",
+            "Open a full remote desktop session (RDP on Windows, VNC on Linux) straight from the browser — no client to install. Works even for machines behind NAT, thanks to a secure reverse tunnel.",
             new[] { "Clientless RDP in the browser", "Works behind NAT / firewalls", "No inbound ports required" },
             SvgRemote),
-        new("tenant", "globe","Multi-institution & multi-tenant",
+        new("tenant", "globe", "Multi-institution management",
             "Each institution admin sees only their own devices; super admins see everything. Roles keep every tenant's data cleanly separated.",
             new[] { "Institution-scoped access", "SuperAdmin / Admin / Viewer roles", "Clean tenant isolation" },
             SvgTenant),
